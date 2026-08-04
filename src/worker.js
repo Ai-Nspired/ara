@@ -14,7 +14,7 @@
 import puppeteer from "@cloudflare/puppeteer";
 
 const CONFIDENCE_THRESHOLD = 0.6;
-const MAX_ITERATIONS = 5;
+const MAX_ITERATIONS = 3;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -74,6 +74,7 @@ async function scrapeUrl(env, url) {
   }
 }
 
+webSearch` and `scrapeUrl`: `env.BROWSER.launch()` → `puppeteer.launch(env.BROWSER)`, and `catch` → `catch (e)` with `console.error`
 async function remember(env, key, value, ttl = 86400) {
   if (!env.KV) return;
   await env.KV.put(key, typeof value === "string" ? value : JSON.stringify(value), {

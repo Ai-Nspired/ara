@@ -1,20 +1,22 @@
 {
-  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "ara",
   "main": "src/worker.js",
   "workers_dev": true,
   "preview_urls": false,
   "compatibility_date": "2025-07-01",
   "compatibility_flags": ["nodejs_compat"],
-  "browser": {
-    "binding": "BROWSER",
-    "remote": true
-  },
+  "browser": [
+    {
+      "binding": "BROWSER"
+    }
+  ],
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "adda688a7fc94a159884945c90e827c3"
+      "id": "4a9bfbffb4d440cba86badc508e2045a"
     }
+  ]
+}
     {
   "observability": {
     "enabled": false,
@@ -34,4 +36,3 @@
 }
   ]
 }
-

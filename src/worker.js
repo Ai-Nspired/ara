@@ -486,7 +486,8 @@ async function handleResolve(request, env) {
   if (!query) return json({ error: "No prompt provided" }, 400);
 
   // ── Cache check ──────────────────────────────────
-    const cacheKey = await hashKey(query + JSON if (env.KV) {
+    const cacheKey = await hashKey(query + JSON.stringify(contextCards));
+    if (env.KV) {
     const cached = await env.KV.get(cacheKey);
     if (cached) {
       const entry = JSON.parse(cached);

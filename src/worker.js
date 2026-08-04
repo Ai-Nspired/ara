@@ -11,6 +11,8 @@
 //   POST /resolve  → { prompt, cards[], system?, model?, max_tokens? }
 //   GET  /health   → { status, browser, kv, openrouter, latencyMs }
 
+import puppeteer from "@cloudflare/puppeteer";
+
 const CONFIDENCE_THRESHOLD = 0.6;
 const MAX_ITERATIONS = 5;
 
@@ -35,7 +37,7 @@ async function hashKey(text) {
 async function webSearch(env, query, maxResults = 5) {
   if (!env.BROWSER) return null;
   try {
-    const browser = await env.BROWSER.launch();
+    const browser = await puppeteer.launch(env.BROWSER);
     try {
       const page = await browser.newPage();
       await page.goto(
@@ -58,7 +60,7 @@ async function webSearch(env, query, maxResults = 5) {
 async function scrapeUrl(env, url) {
   if (!env.BROWSER) return null;
   try {
-    const browser = await env.BROWSER.launch();
+    const browser = await puppeteer.launch(env.BROWSER);
     try {
       const page = await browser.newPage();
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });

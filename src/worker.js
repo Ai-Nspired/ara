@@ -52,7 +52,8 @@ async function webSearch(env, query, maxResults = 5) {
     } finally {
       await browser.close();
     }
-  } catch {
+  } catch (e) {
+    console.error("webSearch error:", e.message);
     return null;
   }
 }
@@ -69,7 +70,8 @@ async function scrapeUrl(env, url) {
     } finally {
       await browser.close();
     }
-  } catch {
+  } catch (e) {
+    console.error("scrapeUrl error:", e.message);
     return null;
   }
 }
@@ -102,6 +104,7 @@ async function callExternalApi(url, options = {}) {
     return { error: e.message };
   }
 }
+Part 4 of 5 — ara/src/worker.js (lines 101-330)
 
 // ═══════════════════════════════════════════════════
 // DOMAIN: UNIVERSAL — Hermetic principles
@@ -189,8 +192,10 @@ async function domainMacro({ query, env, trail }) {
   const universalEntry = trail.find((t) => t.domain === "universal");
   const principles = universalEntry?.result || "";
 
+  const iteration = trail.filter((t) => t.domain === "macro").length + 1;
+
   let webContext = null;
-  if (env.BROWSER) {
+  if (env.BROWSER && iteration === 1) {
     webContext = await webSearch(env, query, 5);
   }
 
@@ -220,7 +225,7 @@ async function domainMacro({ query, env, trail }) {
     found: true,
     source: "macro",
     result: JSON.stringify(broadView),
-    note: `Macro — ${webContext ? "with web" : "no web"} ${memory ? "with memory" : "no memory"}`,
+    note: `Macro iter ${iteration} — ${webContext ? "with web" : "no web"} ${memory ? "with memory" : "no memory"}`,
   };
 }
 
@@ -235,8 +240,10 @@ async function domainMicro({ query, env, trail }) {
     if (macroEntry?.result) broadView = JSON.parse(macroEntry.result);
   } catch {}
 
+  const iteration = trail.filter((t) => t.domain === "micro").length + 1;
+
   let webDetail = null;
-  if (env.BROWSER) {
+  if (env.BROWSER && iteration === 1) {
     webDetail = await webSearch(env, `${query} specifics details`, 3);
   }
 
@@ -266,7 +273,7 @@ async function domainMicro({ query, env, trail }) {
     found: true,
     source: "micro",
     result: JSON.stringify(closeUp),
-    note: `Micro — ${cachedFact ? "with cached fact" : "no cache"} ${webDetail ? "with web" : "no web"}`,
+    note: `Micro iter ${iteration} — ${cachedFact ? "with cached fact" : "no cache"} ${webDetail ? "with web" : "no web"}`,
   };
 }
 
@@ -286,8 +293,10 @@ async function domainSpecific({ query, env, trail }) {
 
   const principles = universalEntry?.result || "";
 
+  const iteration = trail.filter((t) => t.domain === "domain-specific").length + 1;
+
   let domainWeb = null;
-  if (env.BROWSER) {
+  if (env.BROWSER && iteration === 1) {
     domainWeb = await webSearch(env, query, 5);
   }
 
@@ -326,9 +335,10 @@ async function domainSpecific({ query, env, trail }) {
     found: true,
     source: "domain-specific",
     result: JSON.stringify(analysis),
-    note: `Domain-specific — ${domainWeb ? "with web" : "no web"} ${memory ? "with memory" : "no memory"}`,
+    note: `Domain-specific iter ${iteration} — ${domainWeb ? "with web" : "no web"} ${memory ? "with memory" : "no memory"}`,
   };
 }
+Part 5 of 5 — ara/src/worker.js (lines 331-end)
 
 // ═══════════════════════════════════════════════════
 // EVIDENCE ASSESSMENT & SYNTHESIS
@@ -488,9 +498,8 @@ async function handleResolve(request, env) {
 
   if (!query) return json({ error: "No prompt provided" }, 400);
 
-  // ── Cache check ──────────────────────────────────
-    const cacheKey = await hashKey(query + JSON.stringify(contextCards));
-    if (env.KV) {
+  const cacheKey = await hashKey(query + JSON.stringify(contextCards));
+  if (env.KV) {
     const cached = await env.KV.get(cacheKey);
     if (cached) {
       const entry = JSON.parse(cached);
@@ -498,7 +507,6 @@ async function handleResolve(request, env) {
     }
   }
 
-  // ── Recursive domain loop ─────────────────────────
   const trail = [];
   let blocked = false;
 
@@ -524,7 +532,6 @@ async function handleResolve(request, env) {
         note: result.note,
       });
 
-      // Ethical guardrail hard stop
       if (domain.name === "ethical" && result.found && result.confidence >= 1.0) {
         blocked = true;
         break;
@@ -533,28 +540,21 @@ async function handleResolve(request, env) {
 
     if (blocked) break;
 
-    // Check if we have enough evidence to synthesize without the LLM
     const evidence = assessEvidence(trail);
     if (evidence.canSynthesize) break;
-
-    // Not enough evidence — loop again. Domains already scraped the web
-    // and read/wrote memory. Next iteration goes deeper with what was learned.
   }
 
-  // ── Ethical block ─────────────────────────────────
   if (blocked) {
     const ethicalResult = trail.find((t) => t.domain === "ethical" && t.confidence >= 1.0);
     const response = ethicalResult?.result || "BLOCKED";
     return json({ response, trail, cached: false, resolved_by: "ethical" });
   }
 
-  // ── Synthesize from domain findings ──────────────
   const synthesis = synthesizeFromDomains(query, trail);
 
   let response = synthesis.response;
   let resolvedBy = synthesis.resolved_by;
 
-  // ── LLM fallback — only if domains truly can't ────
   if (!synthesis.canResolve) {
     const domainContext = trail
       .filter((t) => t.found && t.result)
@@ -610,7 +610,6 @@ async function handleResolve(request, env) {
     }
   }
 
-  // ── Cache & return ───────────────────────────────
   if (env.KV && response) {
     await env.KV.put(cacheKey, JSON.stringify({ response, trail }), {
       expirationTtl: 3600,

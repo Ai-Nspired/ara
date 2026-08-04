@@ -11,8 +11,6 @@
 //   POST /resolve  → { prompt, cards[], system?, model?, max_tokens? }
 //   GET  /health   → { status, browser, kv, openrouter, latencyMs }
 
-import puppeteer from "@cloudflare/puppeteer";
-
 const CONFIDENCE_THRESHOLD = 0.6;
 const MAX_ITERATIONS = 3;
 

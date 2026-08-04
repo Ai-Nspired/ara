@@ -4,7 +4,7 @@
 //
 // Bindings needed:
 //   KV                 — persistent memory + cache
-//   BROWSER            — Browser Rendering (remote: false, nodejs_compat)
+//   BROWSER            — Browser Rendering (remote: true, nodejs_compat)
 //   OPENROUTER_API_KEY — secret for LLM fallback
 //
 // Endpoints:
@@ -19,7 +19,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
-
 // ═══════════════════════════════════════════════════
 // SHARED UTILITIES
 // ═══════════════════════════════════════════════════
@@ -31,55 +30,27 @@ async function hashKey(text) {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
-
 async function webSearch(env, query, maxResults = 5) {
-  if (!env.BROWSER) return null;
   try {
-    const browser = await puppeteer.launch(env.BROWSER);
-    try {
-      const page = await browser.newPage();
-      await page.goto(
-        `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-        { waitUntil: "domcontentloaded", timeout: 8000 }
-      );
-      const results = await page.evaluate(() => {
-        const items = [...document.querySelectorAll(".result__snippet, .result__a")];
-        return items.slice(0, 5).map((el) => el.textContent.trim());
-      });
-      return results.length > 0 ? results.slice(0, maxResults) : null;
-    } finally {
-      await browser.close();
+    const res = await fetch(
+      `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
+      { headers: { "User-Agent": "Mozilla/5.0" } }
+    );
+    if (!res.ok) return null;
+    const html = await res.text();
+    const snippets = [];
+    const regex = /<td[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/td>/g;
+    let match;
+    while ((match = regex.exec(html)) !== null && snippets.length < maxResults) {
+      snippets.push(match[1].replace(/<[^>]+>/g, "").trim());
     }
+    return snippets.length > 0 ? snippets : null;
   } catch (e) {
     console.error("webSearch error:", e.message);
     return null;
   }
 }
 
-async function scrapeUrl(env, url) {
-  if (!env.BROWSER) return null;
-  try {
-    const browser = await puppeteer.launch(env.BROWSER);
-    try {
-      const page = await browser.newPage();
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
-      const text = await page.evaluate(() => document.body.innerText);
-      return text ? text.substring(0, 5000) : null;
-    } finally {
-      await browser.close();
-    }
-  } catch (e) {
-    console.error("scrapeUrl error:", e.message);
-    return null;
-  }
-}
-
-async function remember(env, key, value, ttl = 86400) {
-  if (!env.KV) return;
-  await env.KV.put(key, typeof value === "string" ? value : JSON.stringify(value), {
-    expirationTtl: ttl,
-  });
-}
 
 async function recall(env, key) {
   if (!env.KV) return null;
@@ -101,8 +72,6 @@ async function callExternalApi(url, options = {}) {
     return { error: e.message };
   }
 }
-Part 4 of 5 — ara/src/worker.js (lines 101-330)
-
 // ═══════════════════════════════════════════════════
 // DOMAIN: UNIVERSAL — Hermetic principles
 // ═══════════════════════════════════════════════════
@@ -335,7 +304,6 @@ async function domainSpecific({ query, env, trail }) {
     note: `Domain-specific iter ${iteration} — ${domainWeb ? "with web" : "no web"} ${memory ? "with memory" : "no memory"}`,
   };
 }
-Part 5 of 5 — ara/src/worker.js (lines 331-end)
 
 // ═══════════════════════════════════════════════════
 // EVIDENCE ASSESSMENT & SYNTHESIS

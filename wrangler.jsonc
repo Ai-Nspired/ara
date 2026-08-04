@@ -5,11 +5,6 @@
   "preview_urls": false,
   "compatibility_date": "2025-07-01",
   "compatibility_flags": ["nodejs_compat"],
-  "browser": [
-    {
-      "binding": "BROWSER"
-    }
-  ],
   "kv_namespaces": [
     {
       "binding": "KV",

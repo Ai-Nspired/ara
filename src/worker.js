@@ -1,5 +1,6 @@
 // ara — pre-inference domain resolution engine
 // Principles + web fetching in 3 loops. No LLM. Streamed output.
+// Updated: Rigorous analytical framing (replaces esoteric lenses).
 //
 // Bindings:
 //   KV — persistent cache
@@ -19,18 +20,18 @@ const corsHeaders = {
 };
 
 // ═══════════════════════════════════════════════════
-// PRINCIPLES — hermetic lenses applied to web findings
+// ANALYTICAL LENSES — rigorous frameworks applied to web findings
 // ═══════════════════════════════════════════════════
 
-const PRINCIPLES = [
-  { name: "Mentalism",      rule: "Information precedes form. What's the core idea?" },
-  { name: "Correspondence",  rule: "As above, so below. What pattern mirrors this elsewhere?" },
-  { name: "Vibration",       rule: "Nothing rests. What's changing or in motion here?" },
-  { name: "Polarity",        rule: "Opposites differ only in degree. What's the tension?" },
-  { name: "Rhythm",          rule: "Everything flows in cycles. Where in the cycle is this?" },
-  { name: "Cause/Effect",    rule: "Nothing happens by chance. What caused this?" },
-  { name: "Gender",          rule: "Creation requires dual principles. What forces combine here?" },
-  { name: "Conservation",    rule: "Nothing is lost, only transformed. What form did this take before?" },
+const ANALYTICAL_LENSES = [
+  { name: "Empirical Grounding",   rule: "What verifiable data or direct evidence supports this?" },
+  { name: "Causal Mechanism",      rule: "What is the precise chain of cause and effect?" },
+  { name: "Systemic Constraints",  rule: "What structural boundaries, limits, or bottlenecks apply?" },
+  { name: "Historical Precedent",  rule: "How have analogous scenarios manifested in the past?" },
+  { name: "Statistical Baseline",  rule: "What is the quantitative likelihood or frequency of this outcome?" },
+  { name: "Adversarial Stress",    rule: "What counter-arguments, failure modes, or edge cases exist?" },
+  { name: "Resource Trade-offs",   rule: "What costs, energy expenditures, or opportunity losses are incurred?" },
+  { name: "Second-Order Effects",  rule: "What downstream or delayed consequences follow this state?" },
 ];
 
 // ═══════════════════════════════════════════════════
@@ -71,21 +72,21 @@ async function webSearch(query, maxResults = 3) {
   }
 }
 
-function applyPrinciples(query, findings) {
+function applyAnalyticalLenses(query, findings) {
   const lines = [];
-  for (const p of PRINCIPLES) {
+  for (const l of ANALYTICAL_LENSES) {
     let best = null;
     for (const f of findings) {
-      if (f.toLowerCase().includes(p.name.toLowerCase().split("/")[0])) {
+      if (f.toLowerCase().includes(l.name.toLowerCase().split(" ")[0])) {
         best = f;
         break;
       }
     }
     if (!best && findings.length > 0) best = findings[0];
     if (best) {
-      lines.push(`${p.name}: ${p.rule} → ${best.substring(0, 150)}`);
+      lines.push(`${l.name}: ${l.rule} → ${best.substring(0, 150)}`);
     } else {
-      lines.push(`${p.name}: ${p.rule}`);
+      lines.push(`${l.name}: ${l.rule}`);
     }
   }
   return lines.join("\n");
@@ -93,17 +94,17 @@ function applyPrinciples(query, findings) {
 
 function synthesize(query, allFindings, trail) {
   const unique = [...new Set(allFindings)].slice(0, 5);
-  const principleAnalysis = applyPrinciples(query, unique);
+  const lensAnalysis = applyAnalyticalLenses(query, unique);
 
   const sections = [];
-  sections.push(query);
+  sections.push(`Query: ${query}`);
   if (unique.length > 0) {
-    sections.push("Findings:");
+    sections.push("Empirical Findings:");
     for (const f of unique) sections.push(`  • ${f.substring(0, 200)}`);
   }
   sections.push("");
-  sections.push("Principles:");
-  sections.push(principleAnalysis);
+  sections.push("Analytical Breakdown:");
+  sections.push(lensAnalysis);
 
   return sections.join("\n");
 }
@@ -128,7 +129,7 @@ function checkEthics(query) {
     /how to (stalk|abduct|kidnap|traffick|exploit).*(person|child|woman|minor)/i,
   ];
   for (const pattern of harmPatterns) {
-    if (pattern.test(query)) return { blocked: true, reason: "Do no harm to humans." };
+    if (pattern.test(query)) return { blocked: true, reason: "Prohibited content vector: potential harm." };
   }
   return { blocked: false };
 }
@@ -161,11 +162,11 @@ async function resolve(query, env) {
     return { response, trail: trailSummary, resolvedBy: "ethical", cached: false };
   }
 
-  // 3 loops: web fetch → principle analysis → confidence assessment
+  // 3 loops: web fetch → analytical lens evaluation → confidence assessment
   for (let loop = 0; loop < MAX_LOOPS; loop++) {
     let searchQuery = query;
-    if (loop === 1) searchQuery = `${query} explained`;
-    if (loop === 2) searchQuery = `${query} details facts`;
+    if (loop === 1) searchQuery = `${query} data analysis verification`;
+    if (loop === 2) searchQuery = `${query} technical specifications constraints`;
 
     const findings = await webSearch(searchQuery, 3);
     allFindings.push(...findings);
@@ -187,7 +188,7 @@ async function resolve(query, env) {
   }
 
   const response = synthesize(query, allFindings, trail);
-  const resolvedBy = allFindings.length > 0 ? "principles+web" : "principles";
+  const resolvedBy = allFindings.length > 0 ? "analytical_lenses+web" : "analytical_lenses";
 
   if (env.KV) {
     await env.KV.put(cacheKey, JSON.stringify({ response, trail, resolvedBy }), { expirationTtl: 3600 });
@@ -239,7 +240,7 @@ export default {
     if (url.pathname === "/resolve" && request.method === "POST") {
       return handleResolve(request, env, url.searchParams.get("stream") === "1");
     }
-    return new Response("ara", { headers: { "Content-Type": "text/plain" } });
+    return new Response("ara-engine-active", { headers: { "Content-Type": "text/plain" } });
   },
 };
 
@@ -268,4 +269,5 @@ function json(data, status = 200) {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
-}
+      }
+    

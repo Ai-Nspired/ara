@@ -235,6 +235,19 @@ export async function ask(env, text, options = {}) {
   };
 }
 
+/** A stored answer that was already there. One written moments ago is not that. */
+function isLookup(outcome) {
+  let out = null;
+  try {
+    out = typeof outcome === 'string' ? JSON.parse(outcome) : outcome;
+  } catch {
+    return false;
+  }
+  if (!out || !out.stored) return false;
+  if (out.origin && out.origin.fresh) return false;
+  return true;
+}
+
 /** What the run produced, for a row that has been told. Evidence, not advice. */
 function describeOutcome(row) {
   if (!row || !row.outcome) return '';
@@ -245,7 +258,19 @@ function describeOutcome(row) {
     return '';
   }
   if (!out) return '';
-  if (out.stored) return `the run returned a stored ${out.stored} answer`;
+  if (out.stored === 'master') return 'a stored master answer';
+  if (out.stored === 'provisional') {
+    // Written in that moment is not written by him beforehand.
+    return out.origin && out.origin.fresh
+      ? 'a provisional answer that had just been written on the spot, not one he wrote'
+      : 'a provisional answer that was already in the store';
+  }
+  if (out.stored === 'candidate') {
+    return out.origin && out.origin.fresh
+      ? 'a candidate written on the spot, not one he wrote'
+      : 'a candidate that was already in the store';
+  }
+  if (out.stored) return `a stored ${out.stored} answer`;
   if (out.returned === 'generated') return 'the run wrote a new answer';
   if (out.returned) return `the run returned ${out.returned}`;
   if (out.returned === false || out.returned === 'nothing') return 'the run returned nothing';
@@ -375,7 +400,7 @@ export function createLoop(env, options = {}) {
       slot.n += 1;
       if (row.correct != null && Number(row.correct) === 1) slot.right += 1;
       if (row.correct != null && Number(row.correct) === 0) slot.wrong += 1;
-      if (row.outcome && String(row.outcome).includes('"stored"')) slot.stored += 1;
+      if (row.outcome && isLookup(row.outcome)) slot.stored += 1;
     }
 
     const ranked = Object.entries(per).sort((a, b) => (b[1].right - b[1].wrong) - (a[1].right - a[1].wrong) || b[1].n - a[1].n);
@@ -383,7 +408,7 @@ export function createLoop(env, options = {}) {
 
     // A shape whose asks came back from the store is a lookup, not an unknown:
     // "ask him" is the wrong answer for something that has already been answered.
-    const storedHere = shapeRows.filter((row) => row.outcome && String(row.outcome).includes('"stored"')).length;
+    const storedHere = shapeRows.filter((row) => row.outcome && isLookup(row.outcome)).length;
     if (store && storedHere && lead && lead.move === 'none') {
       lead = { ...(per[store] || { n: 0, right: 0, wrong: 0, stored: 0 }), move: store, shape: idiom ? idiom.name : null };
     }
@@ -623,9 +648,9 @@ export function createLoop(env, options = {}) {
   }
 
   /** The product reports what the decision produced, after it produced it. */
-  async function outcome({ id, returned = null, stored = null, route = null } = {}) {
+  async function outcome({ id, returned = null, stored = null, route = null, origin = null } = {}) {
     if (id == null) throw new Error('outcome needs the row id');
-    const what = { returned, stored, route, at: clock().toISOString() };
+    const what = { returned, stored, route, origin, at: clock().toISOString() };
 
     if (db) {
       await db

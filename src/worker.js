@@ -361,6 +361,7 @@ async function handleOutcome(request, env) {
       returned: body.returned ?? null,
       stored: body.stored ?? null,
       route: body.route ?? null,
+      origin: body.origin ?? null,
     }));
   } catch (error) {
     return json({ error: "outcome_failed", message: String(error.message || error) }, 400);

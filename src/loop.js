@@ -554,10 +554,16 @@ export function createLoop(env, options = {}) {
       : '';
     const seen = heldNote ? `${heldNote}\n\n${looked.text}` : looked.text;
 
+    // A stored pair that asks him back is settled here, not by a decider: the
+    // text in front of her already says it is not an answer.
+    const pairSettles = Boolean(held) && held.layer !== 'master' && asksBackText(held.answer);
+
     // He answered her card: that answer is the decision, and no decider is billed.
     const decided = askOptions.forced
       ? { move: askOptions.forced, scope: null, route: null, refused: false, cost: 0, model: 'his-answer' }
-      : await ask(env, text, { ...askOptions, review: seen, domains: choices });
+      : pairSettles
+        ? { move: 'unclear', scope: null, route: null, refused: false, cost: 0, model: 'the-stored-pair' }
+        : await ask(env, text, { ...askOptions, review: seen, domains: choices });
     // Her identification wins when it is a domain he has put in the list.
     const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
     const at = clock().toISOString();
@@ -592,7 +598,7 @@ export function createLoop(env, options = {}) {
 
     // A stored pair that comes back as a question is not the result: there is a
     // call to make, and it is his.
-    const notAnAnswer = Boolean(held) && held.layer !== 'master' && asksBackText(held.answer);
+    const notAnAnswer = pairSettles;
     if (notAnAnswer) {
       return {
         id, key, at, domain: picked, surface,

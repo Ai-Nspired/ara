@@ -25,3 +25,8 @@ generic menu, or one over a surface's own menu.
 ## Never added
 
 `expirationTtl` on a record: rows and interaction bodies carry no TTL.
+
+## 2026-11-15, later
+
+The test file was deleted on the owner's instruction: he learns from her
+decisions, not from tests written without him.

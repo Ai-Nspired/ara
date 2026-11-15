@@ -19,7 +19,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_id": "248766b1-d102-4e9e-a228-a19281ed5fe6"
+      "database_id": "248766b1-d102-4e9e-a228-a19281ed5fe6",
+      "database_name": "ara"
     }
   ],
   "r2_buckets": [

@@ -142,5 +142,5 @@ When it is wired, **no write may pass `expirationTtl`.**
 - Do not design or wire anything you were not told to wire. If you do not understand how the
   parts fit, ask — do not propose a design for a system you do not understand.
 - TEW is the truth engine workstation: it reads truths, queries and audits as the engine makes
-  them. Nothing is wired into it for ARA. TEP exists; treat it as if it does not.
+  them. Nothing is wired into it for ARA. TEP is in use; do not invent a connection into it.
 - ARA decides in front of the tools actually in use: the cards workstation and the truth engine.

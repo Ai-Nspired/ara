@@ -255,9 +255,29 @@ export default {
     if (url.pathname === "/decide" && request.method === "POST") return handleDecide(request, env);
     if (url.pathname === "/feedback" && request.method === "POST") return handleFeedback(request, env);
     if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
+    if (url.pathname === "/domains") {
+      if (request.method === "GET") {
+        const list = await loopFor(env).domains();
+        return json({ domains: list });
+      }
+      if (request.method === "POST") {
+        let body;
+        try {
+          body = await request.json();
+        } catch {
+          return json({ error: "invalid_json" }, 400);
+        }
+        try {
+          return json(await loopFor(env).addDomain(body.name || body.domain));
+        } catch (error) {
+          return json({ error: "domain_failed", message: String(error.message || error) }, 400);
+        }
+      }
+    }
     if (url.pathname === "/review" && request.method === "GET") {
       const ask = url.searchParams.get("ask");
-      return json(await loopFor(env).review(url.searchParams.get("domain") || null, ask, ask ? idiomOf(ask) : null));
+      const list = await loopFor(env).domains();
+      return json(await loopFor(env).review(url.searchParams.get("domain") || null, ask, ask ? idiomOf(ask) : null, null, list.length ? list : ["general"]));
     }
     if (url.pathname === "/progress" && request.method === "GET") return handleProgress(url, env);
     if (url.pathname === "/recent" && request.method === "GET") return handleRecent(url, env);

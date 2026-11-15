@@ -25,12 +25,14 @@ export const SCHEMA = [
   correct       INTEGER,
   corrected_to  TEXT,
   outcome       TEXT,
-  idiom         TEXT
+  idiom         TEXT,
+  surface       TEXT
 )`,
   `CREATE INDEX IF NOT EXISTS decisions_domain_at ON decisions (domain, at)`,
   // Added after the table existed; fails harmlessly on a table that has it.
   `ALTER TABLE decisions ADD COLUMN outcome TEXT`,
   `ALTER TABLE decisions ADD COLUMN idiom TEXT`,
+  `ALTER TABLE decisions ADD COLUMN surface TEXT`,
 ];
 
 
@@ -189,6 +191,15 @@ export async function ask(env, text, options = {}) {
           instructions: (surface ? surface.question : INTENT_QUESTION) + ' ' + IDIOM_RULE,
           criteria: asked,
         },
+        ...(options.domains && options.domains.length
+          ? {
+              scope: {
+                type: 'choice',
+                instructions: 'Which domain is he asking in?',
+                criteria: options.domains,
+              },
+            }
+          : {}),
         ...(surface ? {} : {
           route: {
             type: 'choice',
@@ -210,6 +221,7 @@ export async function ask(env, text, options = {}) {
   const data = await response.json();
   const answer = (data && data.answers && data.answers.intent) || null;
   const route = (data && data.answers && data.answers.route) || null;
+  const scope = (data && data.answers && data.answers.scope) || null;
 
   if (!answer || answer.type === 'refusal') {
     return { move: null, route: null, refused: true, probabilities: null, confidence: null, routeConfidence: null, cost: data?.usage?.cost ?? null, model: data?.model || model };
@@ -217,6 +229,7 @@ export async function ask(env, text, options = {}) {
 
   return {
     move: answer.choice ?? null,
+    scope: scope && scope.type !== 'refusal' ? scope.choice ?? null : null,
     route: route && route.type !== 'refusal' ? route.choice ?? null : null,
     refused: false,
     probabilities: answer.probabilities || null,
@@ -289,6 +302,14 @@ export function idiomOf(text) {
 const IDIOM_RULE =
   'If he states what he wants, that is the answer. If asks of this shape have gone one way before, that is where this one goes. If it is new and not clear, choose none.';
 
+// The domains are a list she keeps, not a taxonomy this file invents: every
+// domain is a KV key under `domain:`, carrying its own metadata — when it was
+// first seen, how often, and what she has chosen in it. Nothing here names a
+// domain the owner has not put there.
+export const DOMAIN_PREFIX = 'domain:';
+
+const slug = (name) => String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
 export function createLoop(env, options = {}) {
   const clock = options.clock || (() => new Date());
   const db = env && env.DB ? env.DB : null;
@@ -311,14 +332,14 @@ export function createLoop(env, options = {}) {
    * whether that was what he wanted. His reaction is evidence, not an answer:
    * the correction is his to judge, and hers to work out.
    */
-  async function review(domain, ask = null, idiom = null, store = null) {
+  async function review(domain, ask = null, idiom = null, store = null, choices = null) {
     if (!db) return { text: '', count: 0 };
     let rows = [];
     try {
       const statement = domain
         ? db.prepare(
-            'SELECT asked, decided, correct, outcome FROM decisions WHERE (correct IS NOT NULL OR outcome IS NOT NULL) AND domain = ? ORDER BY at DESC, id DESC LIMIT 12',
-          ).bind(domain)
+            'SELECT asked, decided, correct, outcome FROM decisions WHERE (correct IS NOT NULL OR outcome IS NOT NULL) AND (surface = ? OR (surface IS NULL AND domain = ?)) ORDER BY at DESC, id DESC LIMIT 12',
+          ).bind(domain, domain)
         : db.prepare(
             'SELECT asked, decided, correct, outcome FROM decisions WHERE correct IS NOT NULL OR outcome IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
           );
@@ -345,7 +366,7 @@ export function createLoop(env, options = {}) {
     let shapeRows = [];
     try {
       const recent = domain
-        ? db.prepare('SELECT asked, decided, correct, outcome FROM decisions WHERE domain = ? ORDER BY at DESC, id DESC LIMIT 80').bind(domain)
+        ? db.prepare('SELECT asked, decided, correct, outcome FROM decisions WHERE surface = ? OR (surface IS NULL AND domain = ?) ORDER BY at DESC, id DESC LIMIT 80').bind(domain, domain)
         : db.prepare('SELECT asked, decided, correct, outcome FROM decisions ORDER BY at DESC, id DESC LIMIT 80');
       const out = await recent.all();
       const all = out?.results || out || [];
@@ -392,6 +413,35 @@ export function createLoop(env, options = {}) {
         '.\n'
       : '';
 
+    // Domain-specific principles: what has held in the domain the ask belongs to.
+    // The domain is his list; if the ask is not in one of them, it is general.
+    let domainLine = '';
+    const assumed = choices && choices.length ? (choices.includes(domain) ? domain : choices.includes('general') ? 'general' : choices[0]) : null;
+    if (assumed) {
+      try {
+        const statement = db.prepare(
+          'SELECT decided, SUM(correct = 1) AS ok, SUM(correct = 0) AS bad, COUNT(*) AS n FROM decisions WHERE domain = ? AND decided IS NOT NULL GROUP BY decided ORDER BY n DESC',
+        ).bind(assumed);
+        const out = await statement.all();
+        const inDomain = out?.results || out || [];
+        if (inDomain.length) {
+          domainLine =
+            `In ${assumed}, what has held: ` +
+            inDomain
+              .map((row) => {
+                const bits = [];
+                if (Number(row.ok || 0)) bits.push(`he wanted it ${row.ok}`);
+                if (Number(row.bad || 0)) bits.push(`he did not want it ${row.bad}`);
+                return `${row.decided} ${row.n}${bits.length ? ' (' + bits.join(', ') + ')' : ''}`;
+              })
+              .join('; ') +
+            '.\n';
+        }
+      } catch {
+        domainLine = '';
+      }
+    }
+
     const seen = tally
       .filter((row) => row && row.decided)
       .map((row) => `${row.decided} ${row.n}`)
@@ -433,6 +483,7 @@ export function createLoop(env, options = {}) {
     return {
       text:
         carried +
+        domainLine +
         shapeLine +
         storeLine +
         (seen ? `\nShe has chosen here before: ${seen}.\n\n` : '') +
@@ -447,23 +498,29 @@ export function createLoop(env, options = {}) {
   async function arrive(text, { domain = null, ...askOptions } = {}) {
     // She reviews everything he has judged before she decides again.
     const idiom = idiomOf(text);
-    const looked = await review(domain, text, idiom, (SURFACES[askOptions.surface] || {}).store || null);
-    const decided = await ask(env, text, { ...askOptions, review: looked.text });
+    const surface = askOptions.surface || domain || null;
+    const known = await domains();
+    const choices = known.length ? known : ['general'];
+    const store = (SURFACES[surface] || {}).store || null;
+    const looked = await review(domain, text, idiom, store, choices);
+    const decided = await ask(env, text, { ...askOptions, review: looked.text, domains: choices });
+    // Her identification wins when it is a domain he has put in the list.
+    const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
     const at = clock().toISOString();
     const key = interactionKey(domain, at);
 
     let id = null;
     if (db) {
       const result = await db
-        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .bind(at, domain, String(text), decided.move, null, null, idiom.kind)
+        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(at, picked, String(text), decided.move, null, null, idiom.kind, surface)
         .run();
       id = rowId(result);
     }
 
     if (kv) {
       const body = {
-        at, domain, asked: text, decided: decided.move, route: decided.route,
+        at, domain: picked, surface, asked: text, decided: decided.move, route: decided.route,
         refused: decided.refused, confidence: decided.confidence, routeConfidence: decided.routeConfidence,
         probabilities: decided.probabilities, routes: decided.routes,
         cost: decided.cost, model: decided.model, correct: null, id,
@@ -473,18 +530,74 @@ export function createLoop(env, options = {}) {
       await kv.put(key, JSON.stringify(body), { metadata: metadataFor(body) });
     }
 
+    await trackedDomain(picked, decided.move, at);
+
     // She answers; the row is what gets written. No probabilities ride out.
     // What the decider billed rides out; what it thought of him does not.
     const face = SURFACES[askOptions.surface] || null;
     return {
       id, key, at, domain,
-      move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost,
+      move: decided.move, domain: picked, surface, route: decided.route, refused: decided.refused, cost: decided.cost,
       reviewed: looked.count,
       idiom: idiom.kind,
       consensus: looked.consensus || null,
       question: face ? face.question : null,
       options: face && face.labels ? Object.values(face.labels) : null,
     };
+  }
+
+  /** The domains he has put in KV, by name. Nothing is guessed if it is empty. */
+  async function domains() {
+    if (!kv) return [];
+    try {
+      const listed = await kv.list({ prefix: DOMAIN_PREFIX });
+      const keys = listed?.keys || [];
+      return keys
+        .map((entry) => (entry.metadata && entry.metadata.name) || String(entry.name || '').slice(DOMAIN_PREFIX.length))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Add a domain to the list. The body and the metadata carry the same record. */
+  async function addDomain(name) {
+    if (!kv) throw new Error('no KV binding');
+    const clean = String(name || '').trim();
+    if (!clean) throw new Error('a domain needs a name');
+    const key = DOMAIN_PREFIX + slug(clean);
+    const at = clock().toISOString();
+    const raw = await kv.get(key);
+    const body = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { name: clean, first: at, seen: 0, moves: {} };
+    body.name = clean;
+    body.last = at;
+    body.seen = Number(body.seen || 0);
+    body.moves = body.moves || {};
+    await kv.put(key, JSON.stringify(body), {
+      metadata: { name: body.name, seen: body.seen, last: body.last, moves: body.moves },
+    });
+    return body;
+  }
+
+  /** Tracking: the domain she decided in gets a visit and the move she made. */
+  async function trackedDomain(name, move, at) {
+    if (!kv || !name) return null;
+    const key = DOMAIN_PREFIX + slug(name);
+    try {
+      const raw = await kv.get(key);
+      const body = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { name, first: at, seen: 0, moves: {} };
+      body.name = name;
+      body.last = at;
+      body.seen = Number(body.seen || 0) + 1;
+      body.moves = body.moves || {};
+      if (move) body.moves[move] = (body.moves[move] || 0) + 1;
+      await kv.put(key, JSON.stringify(body), {
+        metadata: { name: body.name, seen: body.seen, last: body.last, moves: body.moves },
+      });
+      return body;
+    } catch {
+      return null;
+    }
   }
 
   /** The product reports what the decision produced, after it produced it. */
@@ -580,5 +693,5 @@ export function createLoop(env, options = {}) {
     }
   }
 
-  return { ensure, arrive, outcome, feedback, progress, recent, detail, review };
+  return { ensure, arrive, outcome, feedback, progress, recent, detail, review, domains, addDomain };
 }

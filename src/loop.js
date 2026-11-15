@@ -542,6 +542,9 @@ export function createLoop(env, options = {}) {
       reviewed: looked.count,
       idiom: idiom.kind,
       consensus: looked.consensus || null,
+      // Her record goes out with the decision: the model that writes the answer
+      // reads the same notes she decided from.
+      notes: looked.text || null,
       question: face ? face.question : null,
       options: face && face.labels ? Object.values(face.labels) : null,
     };

@@ -46,28 +46,19 @@ export const SCHEMA = [
  */
 export const SURFACES = {
   mind: {
-    // The question is not "which command" — it is what he is trying to get out
-    // of the thing he handed over. The options are results, not buttons.
-    question: 'He has presented this. What result is he trying to get?',
-    store: 'truth',
+    // Three things, and only three: a result produced, a preset run, or a
+    // question answered. Everything he hands over is one of them.
+    question: 'He has handed you this. Which is it: a result he wants produced, a preset he wants run, or something he is asking?',
+    store: 'result',
     labels: {
-      truth: 'The stored answer, as it stands',
-      operator: 'An answer written now',
-      mnl: 'The manual form',
-      doc: 'A document he can send',
-      micro: 'A microsite he can open',
-      style: 'A palette, nothing else',
-      browse: 'The answer, after the page is read',
+      result: 'A result produced',
+      preset: 'A preset run',
+      ask: 'Something he is asking',
     },
     actions: {
-      truth: 'The answer the store already holds, handed back as it stands — no new writing.',
-      operator: 'A fresh answer written now, in his operator voice.',
-      mnl: 'The manual form of the answer — MNL.',
-      doc: 'A laid-out document, printable and sendable.',
-      micro: 'A built microsite he can open.',
-      style: 'A palette — colours and type — and no prose.',
-      browse: 'The page he pointed at, read first, and the answer drawn from it.',
-      none: 'None of these results.',
+      result: 'A result — the thing itself, produced: what the store already holds, or the artifact built. No new prose.',
+      preset: 'One of his presets, run as that preset — he says which, or the client already has it selected.',
+      ask: 'He is asking something, and the answer is written now.',
     },
   },
   cards: {

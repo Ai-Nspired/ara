@@ -558,11 +558,48 @@ export function createLoop(env, options = {}) {
     // text in front of her already says it is not an answer.
     const pairSettles = Boolean(held) && held.layer !== 'master' && asksBackText(held.answer);
 
+    // A bare word with digits on the end is a key, not a question: it is looking
+    // for a stored pair. Found, that pair is the result. Not found, there is
+    // nothing to answer and nothing to write until he says what it should be.
+    const isKey = idiom.kind === 'code';
+    if (isKey && !held) {
+      const at2 = clock().toISOString();
+      const key2 = interactionKey(domain, at2);
+      let id2 = null;
+      if (db) {
+        const result = await db
+          .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(at2, picked, String(text), 'unclear', null, null, idiom.kind, surface)
+          .run();
+        id2 = rowId(result);
+      }
+      return {
+        id: id2, key: key2, at: at2, domain: picked, surface,
+        move: 'unclear',
+        text: `"${clip(String(text), 60)}" is a key, and there is no stored pair for it.`,
+        clarify: {
+          text: `"${clip(String(text), 60)}" is a key, and there is no stored pair for it.`,
+          questions: [
+            {
+              id: 'want',
+              q: 'There is nothing stored under that key. What should happen?',
+              options: [
+                { value: 'write', label: 'Write a new answer for that key' },
+                { value: 'none', label: 'Leave it — no pair for now' },
+              ],
+            },
+          ],
+        },
+      };
+    }
+
     // He answered her card: that answer is the decision, and no decider is billed.
     const decided = askOptions.forced
       ? { move: askOptions.forced, scope: null, route: null, refused: false, cost: 0, model: 'his-answer' }
       : pairSettles
         ? { move: 'unclear', scope: null, route: null, refused: false, cost: 0, model: 'the-stored-pair' }
+        : isKey
+          ? { move: 'result', scope: null, route: null, refused: false, cost: 0, model: 'the-key' }
         : await ask(env, text, { ...askOptions, review: seen, domains: choices });
     // Her identification wins when it is a domain he has put in the list.
     const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];

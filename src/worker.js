@@ -158,7 +158,7 @@ async function resolve(query, env) {
   if (ethics.blocked) {
     const response = `BLOCKED: ${ethics.reason}`;
     const trailSummary = [{ loop: 0, web: 0, conf: "100%" }];
-    if (env.KV) await env.KV.put(cacheKey, JSON.stringify({ response, trail: trailSummary, resolvedBy: "ethical" }), { expirationTtl: 3600 });
+    if (env.KV) await env.KV.put(cacheKey, JSON.stringify({ response, trail: trailSummary, resolvedBy: "ethical" }), { expirationTtl: 86400 });
     return { response, trail: trailSummary, resolvedBy: "ethical", cached: false };
   }
 
@@ -191,7 +191,7 @@ async function resolve(query, env) {
   const resolvedBy = allFindings.length > 0 ? "analytical_lenses+web" : "analytical_lenses";
 
   if (env.KV) {
-    await env.KV.put(cacheKey, JSON.stringify({ response, trail, resolvedBy }), { expirationTtl: 3600 });
+    await env.KV.put(cacheKey, JSON.stringify({ response, trail, resolvedBy }), { expirationTtl: 86400 });
   }
 
   return { response, trail, resolvedBy, cached: false };
@@ -269,5 +269,4 @@ function json(data, status = 200) {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
-      }
-    
+}

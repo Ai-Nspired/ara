@@ -284,7 +284,28 @@ export function createLoop(env, options = {}) {
     } catch {
       return { text: '', count: 0 };
     }
-    if (!rows.length) return { text: '', count: 0 };
+    // Her own consensus: what she has repeatedly chosen in this surface. Not a
+    // score and not advice — the thing she has already done, so she can carry it
+    // through instead of deciding each ask from nothing.
+    let tally = [];
+    try {
+      const counted = domain
+        ? db.prepare('SELECT decided, COUNT(*) AS n FROM decisions WHERE decided IS NOT NULL AND domain = ? GROUP BY decided ORDER BY n DESC').bind(domain)
+        : db.prepare('SELECT decided, COUNT(*) AS n FROM decisions WHERE decided IS NOT NULL GROUP BY decided ORDER BY n DESC');
+      const out = await counted.all();
+      tally = out?.results || out || [];
+    } catch {
+      tally = [];
+    }
+
+    const seen = tally
+      .filter((row) => row && row.decided)
+      .map((row) => `${row.decided} ${row.n}`)
+      .join(', ');
+
+    if (!rows.length) {
+      return { text: seen ? `She has chosen here before: ${seen}.` : '', count: 0 };
+    }
 
     const lines = rows
       .filter((row) => row && row.asked)
@@ -300,7 +321,8 @@ export function createLoop(env, options = {}) {
 
     return {
       text:
-        'What he has said about these before, in his own words. Nothing here tells you what to pick:\n' +
+        (seen ? `She has chosen here before: ${seen}.\n\n` : '') +
+        'What happened on the asks he has reacted to, and where the run showed the result:\n' +
         lines.join('\n'),
       count: lines.length,
     };
@@ -440,5 +462,5 @@ export function createLoop(env, options = {}) {
     }
   }
 
-  return { ensure, arrive, outcome, feedback, progress, recent, detail };
+  return { ensure, arrive, outcome, feedback, progress, recent, detail, review };
 }

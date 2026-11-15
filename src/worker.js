@@ -255,6 +255,9 @@ export default {
     if (url.pathname === "/decide" && request.method === "POST") return handleDecide(request, env);
     if (url.pathname === "/feedback" && request.method === "POST") return handleFeedback(request, env);
     if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
+    if (url.pathname === "/review" && request.method === "GET") {
+      return json(await loopFor(env).review(url.searchParams.get("domain") || null));
+    }
     if (url.pathname === "/progress" && request.method === "GET") return handleProgress(url, env);
     if (url.pathname === "/recent" && request.method === "GET") return handleRecent(url, env);
     return new Response("ara-engine-active", { headers: { "Content-Type": "text/plain" } });

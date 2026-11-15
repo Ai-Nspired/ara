@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { createLoop, ask, DECIDER, MOVES, metadataFor, SCHEMA } from '../src/loop.js';
+import { createLoop, ask, DECIDER, JOINT_DECIDER, MOVES, ROUTES, metadataFor, SCHEMA } from '../src/loop.js';
 
 function d1() {
   const db = new DatabaseSync(':memory:');
@@ -45,11 +45,15 @@ function kv() {
 }
 
 /** A fetch that records the request and answers with a canned decision. */
-function decider(answer = { type: 'choice', choice: 'card', probabilities: { card: 0.86, none: 0.09, question: 0.05 }, confidence: 0.86 }, usage = { cost: 0.000021 }) {
+function decider(
+  answer = { type: 'choice', choice: 'card', probabilities: { card: 0.86, none: 0.09, question: 0.05 }, confidence: 0.86 },
+  usage = { cost: 0.000021 },
+  routeAnswer = { type: 'choice', choice: 'truth', probabilities: { truth: 0.74, generate: 0.2, card: 0.6 }, confidence: 0.74 },
+) {
   const calls = [];
   const impl = async (url, init) => {
     calls.push({ url, body: JSON.parse(init.body), headers: init.headers });
-    return new Response(JSON.stringify({ model: DECIDER, answers: { intent: answer }, usage }), { status: 200 });
+    return new Response(JSON.stringify({ model: JOINT_DECIDER, answers: { intent: answer, route: routeAnswer }, usage }), { status: 200 });
   };
   impl.calls = calls;
   return impl;
@@ -66,23 +70,25 @@ async function build(answer, usage) {
   return { loop, store, env, fetchImpl };
 }
 
-test('the decider is the paid one, never a :free slug', () => {
+test('the deciders are the paid ones, never a :free slug', () => {
   assert.equal(DECIDER, 'perplexity/pplx-decider-flash-v1.2');
-  assert.equal(DECIDER.includes(':free'), false);
+  assert.equal(JOINT_DECIDER, 'perplexity/pplx-decider-v1.2');
+  assert.equal(DECIDER.includes(':free') || JOINT_DECIDER.includes(':free'), false);
 });
 
-test('one paid decider, one choice question, a real catch-all', async () => {
+test('label and route in one paid pass, with a real catch-all', async () => {
   const { loop, fetchImpl } = await build();
   await loop.arrive('make me an audit of the deed', { domain: 'legal', fetchImpl });
 
   const [{ url, body, headers }] = fetchImpl.calls;
   assert.equal(url, 'https://openrouter.ai/api/alpha/decisions');
-  assert.equal(body.model, DECIDER);
+  assert.equal(body.model, JOINT_DECIDER, 'two questions are answered jointly, so the state bills once');
   assert.equal(body.model.includes(':free'), false);
-  assert.equal(Object.keys(body.questions).length, 1, 'one question, one pass');
+  assert.deepEqual(Object.keys(body.questions), ['intent', 'route'], 'label and route, one pass');
   assert.equal(body.questions.intent.type, 'choice');
   assert.deepEqual(Object.keys(body.questions.intent.criteria), Object.keys(MOVES));
   assert.ok(body.questions.intent.criteria.none, 'the catch-all is a real option');
+  assert.deepEqual(Object.keys(body.questions.route.criteria), Object.keys(ROUTES));
   assert.equal(headers.Authorization, 'Bearer test-key');
 });
 
@@ -91,6 +97,8 @@ test('an arrival writes the row and the body, with no TTL anywhere', async () =>
   const result = await loop.arrive('make me an audit of the deed', { domain: 'legal', fetchImpl });
 
   assert.equal(result.move, 'card');
+  assert.equal(result.route, 'truth');
+  assert.equal(result.routeConfidence, 0.74);
   assert.equal(result.confidence, 0.86);
   assert.equal(result.cost, 0.000021);
   assert.ok(result.id > 0);
@@ -103,7 +111,9 @@ test('an arrival writes the row and the body, with no TTL anywhere', async () =>
 
   const body = await loop.detail(result.key);
   assert.equal(body.probabilities.card, 0.86);
+  assert.equal(body.route, 'truth');
   assert.equal(body.cost, 0.000021);
+  assert.equal(store.puts[0].opts.metadata.route, 'truth', 'the route rides in metadata for scanning');
 
   for (const put of store.puts) {
     assert.equal(put.opts.expirationTtl, undefined, `${put.key} was written with a TTL`);

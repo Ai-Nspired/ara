@@ -10,8 +10,10 @@
 
 export const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
 
-// Paid decider, one question per pass. No `:free` slugs here.
+// Paid deciders. One question bills flash; two or more answer jointly so the
+// state is charged once. No `:free` slugs here.
 export const DECIDER = 'perplexity/pplx-decider-flash-v1.2';
+export const JOINT_DECIDER = 'perplexity/pplx-decider-v1.2';
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS decisions (
@@ -38,6 +40,19 @@ export const MOVES = {
 
 export const INTENT_QUESTION = 'Which of these is he asking for?';
 
+/**
+ * Where it goes. A separate axis from what it is: the same ask can be an audit
+ * and still belong to truth.
+ */
+export const ROUTES = {
+  truth: 'The truth store may already hold this, or it is an audit of material against stored truth.',
+  generate: 'Nothing stored covers it and something has to be written, fetched or searched for.',
+  card: 'The work happens in the workspace: a card runs, merges, files or lays something out.',
+  answer: 'He wants the answer back and nothing else has to happen.',
+};
+
+export const ROUTE_QUESTION = 'Where does this go?';
+
 const META_LIMIT = 1024;
 const KEY = 'int:';
 
@@ -56,6 +71,7 @@ export function metadataFor(entry) {
       domain: entry.domain || 'none',
       asked: clip(entry.asked, chars),
       decided: clip(entry.decided, 120),
+      route: entry.route ? clip(entry.route, 24) : null,
       correct: entry.correct == null ? null : Number(entry.correct),
     };
     if (withResult && entry.result != null) meta.result = clip(entry.result, 80);
@@ -80,7 +96,9 @@ const rowId = (result) => {
 export async function ask(env, text, options = {}) {
   if (!text) throw new Error('ask needs what was asked');
   const fetchImpl = options.fetchImpl || fetch;
-  const model = options.model || DECIDER;
+  const routes = options.routes || ROUTES;
+  // Two questions are answered jointly, so the state is billed once.
+  const model = options.model || JOINT_DECIDER;
   const moves = options.moves || MOVES;
 
   if (!env || !env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY is not bound');
@@ -100,6 +118,11 @@ export async function ask(env, text, options = {}) {
           instructions: INTENT_QUESTION,
           criteria: moves,
         },
+        route: {
+          type: 'choice',
+          instructions: ROUTE_QUESTION,
+          criteria: routes,
+        },
       },
     }),
   });
@@ -113,16 +136,20 @@ export async function ask(env, text, options = {}) {
 
   const data = await response.json();
   const answer = (data && data.answers && data.answers.intent) || null;
+  const route = (data && data.answers && data.answers.route) || null;
 
   if (!answer || answer.type === 'refusal') {
-    return { move: null, refused: true, probabilities: null, confidence: null, cost: data?.usage?.cost ?? null, model: data?.model || model };
+    return { move: null, route: null, refused: true, probabilities: null, confidence: null, routeConfidence: null, cost: data?.usage?.cost ?? null, model: data?.model || model };
   }
 
   return {
     move: answer.choice ?? null,
+    route: route && route.type !== 'refusal' ? route.choice ?? null : null,
     refused: false,
     probabilities: answer.probabilities || null,
     confidence: answer.confidence ?? null,
+    routes: route && route.type !== 'refusal' ? route.probabilities || null : null,
+    routeConfidence: route && route.type !== 'refusal' ? route.confidence ?? null : null,
     cost: data?.usage?.cost ?? null,
     model: data?.model || model,
   };
@@ -156,10 +183,10 @@ export function createLoop(env, options = {}) {
 
     if (kv) {
       const body = {
-        at, domain, asked: text, decided: decided.move,
-        refused: decided.refused, confidence: decided.confidence,
-        probabilities: decided.probabilities, cost: decided.cost, model: decided.model,
-        correct: null, id,
+        at, domain, asked: text, decided: decided.move, route: decided.route,
+        refused: decided.refused, confidence: decided.confidence, routeConfidence: decided.routeConfidence,
+        probabilities: decided.probabilities, routes: decided.routes,
+        cost: decided.cost, model: decided.model, correct: null, id,
       };
       // No expirationTtl: this is a record.
       await kv.put(key, JSON.stringify(body), { metadata: metadataFor(body) });

@@ -563,18 +563,20 @@ export function createLoop(env, options = {}) {
     // nothing to answer and nothing to write until he says what it should be.
     const isKey = idiom.kind === 'code';
     if (isKey && !held) {
+      // No decider runs here, so the domain is the one he named or the default.
+      const pickedNow = choices.includes(domain) ? domain : choices[0];
       const at2 = clock().toISOString();
       const key2 = interactionKey(domain, at2);
       let id2 = null;
       if (db) {
         const result = await db
           .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(at2, picked, String(text), 'unclear', null, null, idiom.kind, surface)
+          .bind(at2, pickedNow, String(text), 'unclear', null, null, idiom.kind, surface)
           .run();
         id2 = rowId(result);
       }
       return {
-        id: id2, key: key2, at: at2, domain: picked, surface,
+        id: id2, key: key2, at: at2, domain: pickedNow, surface,
         move: 'unclear',
         text: `"${clip(String(text), 60)}" is a key, and there is no stored pair for it.`,
         clarify: {

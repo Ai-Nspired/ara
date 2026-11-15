@@ -237,6 +237,14 @@ export async function ask(env, text, options = {}) {
   };
 }
 
+/** A stored "answer" that is really a question back at him. */
+function asksBackText(text) {
+  const value = String(text || '').trim();
+  if (!value || value.length > 320) return false;
+  if (/\?\s*$/.test(value)) return true;
+  return /\b(what is the call|how would you like|do you want me to|please (specify|clarify)|let me know|can you clarify)\b/i.test(value);
+}
+
 /** A stored answer that was already there. One written moments ago is not that. */
 function isLookup(outcome) {
   let out = null;
@@ -579,6 +587,31 @@ export function createLoop(env, options = {}) {
     // She answers; the row is what gets written. No probabilities ride out.
     // What the decider billed rides out; what it thought of him does not.
     const face = SURFACES[askOptions.surface] || null;
+
+    // A stored pair that comes back as a question is not the result: there is a
+    // call to make, and it is his.
+    const notAnAnswer = Boolean(held) && held.layer !== 'master' && asksBackText(held.answer);
+    if (notAnAnswer) {
+      return {
+        id, key, at, domain: picked, surface,
+        move: decided.move || null,
+        question: `The store holds this for "${clip(String(text), 80)}", and it asks you back instead of answering:`,
+        answer: clip(String(held.answer), 240),
+        clarify: {
+          questions: [
+            {
+              id: 'want',
+              q: 'What should happen with it?',
+              options: [
+                { value: 'use', label: 'Use that stored answer as it stands' },
+                { value: 'pair', label: 'Show me the stored pair behind it' },
+                { value: 'write', label: 'Write a new answer now' },
+              ],
+            },
+          ],
+        },
+      };
+    }
 
     // Not understanding is not a guess. She says so, the card asks him, and
     // nothing behind her runs.

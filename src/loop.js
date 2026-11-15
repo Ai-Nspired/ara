@@ -305,7 +305,7 @@ const VERBS = new Set([
 ]);
 
 const IDIOM_NAMES = {
-  code: 'a bare code',
+  code: 'a key',
   reference: 'a reference',
   question: 'a question',
   instruction: 'an instruction',
@@ -319,13 +319,22 @@ export function idiomOf(text) {
   const low = raw.toLowerCase();
   if (!raw) return { kind: 'empty', name: IDIOM_NAMES.empty };
   if (/^https?:\/\//i.test(raw) || /^\/[^\s]*$/.test(raw)) return { kind: 'reference', name: IDIOM_NAMES.reference };
-  if (raw.split(/\s+/).length === 1 && /^[a-z]{1,8}[-_]?\d{2,}$/i.test(raw)) return { kind: 'code', name: IDIOM_NAMES.code };
+  // Greetings and courtesies are not keys, whatever their length.
+  if (/^(hi|hey|hello|yo|thanks|thank|cheers|yes|no|yep|nope|ok|okay|please|stop|help)\b/i.test(low)) {
+    return { kind: 'short', name: IDIOM_NAMES.short };
+  }
   if (/\?$/.test(raw) || /^(what|why|how|when|where|who|which|is|are|does|do|can|could|should|would|will)\b/i.test(low)) {
     return { kind: 'question', name: IDIOM_NAMES.question };
   }
-  const first = low.split(/\s+/)[0].replace(/[^a-z]/g, '');
+  const words = raw.split(/\s+/);
+  const first = words[0].replace(/[^a-z]/g, '');
   if (VERBS.has(first)) return { kind: 'instruction', name: IDIOM_NAMES.instruction };
-  if (raw.length <= 24 && raw.split(/\s+/).length <= 2) return { kind: 'short', name: IDIOM_NAMES.short };
+  // A word, or two words and no sentence around them: that is a key looking for
+  // its pair, not prose. Plain language has verbs and articles in it.
+  if (words.length <= 2 && !/[.!]$/.test(raw) && !/^(a|an|the)\b/i.test(low)) {
+    return { kind: 'code', name: IDIOM_NAMES.code };
+  }
+  if (raw.length <= 24 && words.length <= 3) return { kind: 'short', name: IDIOM_NAMES.short };
   return { kind: 'statement', name: IDIOM_NAMES.statement };
 }
 

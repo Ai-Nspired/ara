@@ -10,7 +10,19 @@
 //   POST /resolve?stream=1  → SSE stream
 //   GET  /health            → { status, kv, latencyMs }
 
+import { createLoop } from './loop.js';
+
 const MAX_LOOPS = 3;
+
+// One schema check per isolate. Every product calls /decide first, so the table
+// is created on the first arrival rather than by a migration nobody runs.
+let schemaReady = null;
+function loopFor(env) {
+  const instance = createLoop(env);
+  if (!schemaReady) schemaReady = instance.ensure().catch(() => false);
+  return instance;
+}
+
 const CONFIDENCE_THRESHOLD = 0.55;
 
 const corsHeaders = {
@@ -240,6 +252,10 @@ export default {
     if (url.pathname === "/resolve" && request.method === "POST") {
       return handleResolve(request, env, url.searchParams.get("stream") === "1");
     }
+    if (url.pathname === "/decide" && request.method === "POST") return handleDecide(request, env);
+    if (url.pathname === "/feedback" && request.method === "POST") return handleFeedback(request, env);
+    if (url.pathname === "/progress" && request.method === "GET") return handleProgress(url, env);
+    if (url.pathname === "/recent" && request.method === "GET") return handleRecent(url, env);
     return new Response("ara-engine-active", { headers: { "Content-Type": "text/plain" } });
   },
 };
@@ -262,6 +278,56 @@ async function handleResolve(request, env, isStream) {
     return streamResponse(response, trailSummary, cached, resolvedBy);
   }
   return json({ response, trail_summary: trailSummary, cached, resolved_by: resolvedBy });
+}
+
+// POST /decide {text|prompt, domain?} — the point of contact. One pass, one row.
+async function handleDecide(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+  const text = body.text || body.prompt || "";
+  if (!text) return json({ error: "text_required" }, 400);
+  try {
+    const result = await loopFor(env).arrive(text, { domain: body.domain || null });
+    return json(result);
+  } catch (error) {
+    return json({ error: "decide_failed", message: String(error.message || error) }, 502);
+  }
+}
+
+// POST /feedback {id, correct, correctedTo?, result?} — the card's verdict.
+async function handleFeedback(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+  if (body.id == null || body.correct == null) return json({ error: "id_and_correct_required" }, 400);
+  try {
+    return json(await loopFor(env).feedback({
+      id: body.id,
+      correct: body.correct,
+      correctedTo: body.correctedTo,
+      result: body.result,
+    }));
+  } catch (error) {
+    return json({ error: "feedback_failed", message: String(error.message || error) }, 400);
+  }
+}
+
+async function handleProgress(url, env) {
+  const domain = url.searchParams.get("domain");
+  return json(await loopFor(env).progress(domain || null));
+}
+
+async function handleRecent(url, env) {
+  const domain = url.searchParams.get("domain");
+  const limit = Number(url.searchParams.get("limit") || 20);
+  return json({ decisions: await loopFor(env).recent({ domain: domain || null, limit }) });
 }
 
 function json(data, status = 200) {

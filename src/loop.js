@@ -40,6 +40,15 @@ export const SCHEMA = [
 export const SURFACES = {
   mind: {
     question: 'What is he wanting?',
+    labels: {
+      truth: 'Answer from the truth store',
+      operator: 'Answer it',
+      mnl: 'The manual form',
+      doc: 'Lay it out as a document',
+      micro: 'Build a microsite',
+      style: 'A palette for the Stylist',
+      browse: 'Read the page first',
+    },
     actions: {
       truth: 'An answer from the truth store — the truth preset. A stored truth answers in place of a model.',
       operator: 'An answer in the operator voice, written now.',
@@ -53,6 +62,18 @@ export const SURFACES = {
   },
   cards: {
     question: 'What is he wanting?',
+    labels: {
+      answer: 'Answer it',
+      search: 'Search the web',
+      fetch: 'Read a page',
+      card: 'Make a card',
+      merge: 'Merge cards',
+      split: 'Split a card',
+      template: 'Use a template',
+      style: 'Restyle a card',
+      magic: 'Tidy a card',
+      continue: 'Carry on with it',
+    },
     actions: {
       answer: 'Answer it, written now, on a card.',
       search: 'Search the web and answer from what comes back.',
@@ -239,8 +260,12 @@ export function createLoop(env, options = {}) {
 
     // She answers; the row is what gets written. No probabilities ride out.
     // What the decider billed rides out; what it thought of him does not.
+    const face = SURFACES[askOptions.surface] || null;
     return {
-      id, key, at, domain, move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost,
+      id, key, at, domain,
+      move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost,
+      question: face ? face.question : null,
+      options: face && face.labels ? Object.values(face.labels) : null,
     };
   }
 

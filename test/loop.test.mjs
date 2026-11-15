@@ -98,8 +98,8 @@ test('an arrival writes the row and the body, with no TTL anywhere', async () =>
 
   assert.equal(result.move, 'card');
   assert.equal(result.route, 'truth');
-  assert.equal(result.routeConfidence, 0.74);
-  assert.equal(result.confidence, 0.86);
+  assert.equal(result.confidence, undefined, 'no scores ride out');
+  assert.equal(result.routeConfidence, undefined);
   assert.equal(result.cost, 0.000021);
   assert.ok(result.id > 0);
   assert.equal(result.key, 'int:legal:2026-11-15T21:05:00.000Z');
@@ -152,15 +152,10 @@ test('is she learning: counted from the rows he has judged', async () => {
   await loop.feedback({ id: c.id, correct: false, correctedTo: 'template' });
 
   const legal = await loop.progress('legal');
-  assert.equal(legal.correct, 2);
-  assert.equal(legal.wrong, 1);
-  assert.equal(legal.pending, 0);
-  assert.equal(legal.rate, 0.6667);
+  assert.deepEqual(legal, { correct: 2, wrong: 1, pending: 0 }, 'counts only');
 
   const all = await loop.progress();
-  assert.equal(all.pending, 1);
-  assert.equal(all.verdicts, 3);
-  assert.equal(all.rate, 0.6667);
+  assert.deepEqual(all, { correct: 2, wrong: 1, pending: 1 });
 });
 
 test('a refusal is not an answer — it is recorded as one, not rounded to none', async () => {
@@ -179,7 +174,6 @@ test('the catch-all can win, and it is what gets recorded', async () => {
   const { loop } = await build(answer);
   const result = await loop.arrive('send the thing to her about the other one', { domain: 'legal', fetchImpl: decider(answer) });
   assert.equal(result.move, 'none');
-  assert.equal(result.confidence, 0.71);
 });
 
 test('metadata stays inside what KV accepts, even for a huge ask', () => {
@@ -195,7 +189,7 @@ test('a missing binding degrades instead of throwing', async () => {
   assert.equal(wrote.id, null);
   assert.ok(await kvOnly.detail(wrote.key));
   assert.deepEqual(await kvOnly.recent(), []);
-  assert.equal((await kvOnly.progress()).rate, null);
+  assert.deepEqual(await kvOnly.progress(), { correct: 0, wrong: 0, pending: 0 });
 
   const dbOnly = createLoop({ DB: d1(), OPENROUTER_API_KEY: 'k' }, { clock: fixed });
   await dbOnly.ensure();

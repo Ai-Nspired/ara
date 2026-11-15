@@ -192,7 +192,9 @@ export function createLoop(env, options = {}) {
       await kv.put(key, JSON.stringify(body), { metadata: metadataFor(body) });
     }
 
-    return { id, key, at, domain, ...decided };
+    // She answers; the row is what gets written. No probabilities ride out.
+    // What the decider billed rides out; what it thought of him does not.
+    return { id, key, at, domain, move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost };
   }
 
   /** The verdict: 1 or 0, and what it should have been. */
@@ -227,21 +229,16 @@ export function createLoop(env, options = {}) {
 
   /** Counted from the rows. */
   async function progress(domain = null) {
-    if (!db) return { correct: 0, wrong: 0, pending: 0, verdicts: 0, rate: null };
+    if (!db) return { correct: 0, wrong: 0, pending: 0 };
     const sql = `SELECT SUM(correct = 1) AS ok, SUM(correct = 0) AS bad, SUM(correct IS NULL) AS open, COUNT(*) AS total
       FROM decisions ${domain ? 'WHERE domain = ?' : ''}`;
     const statement = domain ? db.prepare(sql).bind(domain) : db.prepare(sql);
     const row = (await statement.first()) || {};
-    const ok = Number(row.ok || 0);
-    const bad = Number(row.bad || 0);
-    const verdicts = ok + bad;
+    // Counts only. No rate, no score.
     return {
-      correct: ok,
-      wrong: bad,
+      correct: Number(row.ok || 0),
+      wrong: Number(row.bad || 0),
       pending: Number(row.open || 0),
-      verdicts,
-      // What he judged right, over everything he has judged.
-      rate: verdicts ? Number((ok / verdicts).toFixed(4)) : null,
     };
   }
 

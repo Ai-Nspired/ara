@@ -1,24 +1,16 @@
 /**
- * ARA's loop. One pass, one row, one verdict.
+ * ARA's loop: decide, write the row, take the verdict, count it.
  *
- *   1. something arrives
- *   2. she decides what it is, from a fixed menu — with a catch-all for "none of these"
- *   3. the row is written: what was asked, what was decided, correct = null
- *   4. he says whether it got his intent and preference right — that is the only
- *      value that comes from outside, and it is what the loop learns from
- *   5. progress() counts the rows, which is the whole of "is she getting it right"
+ * The worker writes everything. The decider answers a presented question and
+ * produces no text; it stores nothing. The metrics come from the rows.
  *
- * D1 holds the rows. KV holds the interaction body with a short metadata summary
- * beside it, so the history reads without fetching bodies.
- *
- * Nothing here passes expirationTtl. Records do not expire; a record written with
- * a cache lifetime can never be read back or promoted.
+ * D1 holds the rows, KV holds the body with a short metadata summary beside it so
+ * history reads without fetching bodies. No put passes expirationTtl.
  */
 
 export const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
 
-// Paid decider. One question, one pass, about $0.01 per million input tokens.
-// Never a `:free` slug: the price of free is that they get to look at the data.
+// Paid decider, one question per pass. No `:free` slugs here.
 export const DECIDER = 'perplexity/pplx-decider-flash-v1.2';
 
 export const SCHEMA = [
@@ -34,12 +26,7 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS decisions_domain_at ON decisions (domain, at)`,
 ];
 
-/**
- * The menu. Each entry is a definition of a case, not a category name, because a
- * definition can be checked against what was actually said. `none` is a real
- * option — the catch-all — so a miss is recorded as a miss instead of being
- * quietly rounded to the nearest thing.
- */
+/** The menu: a definition per option, with `none` as a real catch-all. */
 export const MOVES = {
   card: 'The ask names something this workspace already does with a card: an audit, a merge, a distill, a fetch, a search. If it could be done by clicking something that already exists, it is this.',
   template: 'The ask is to lay material out in the HTML template — styling, structure, or sending a finished document over.',
@@ -152,7 +139,7 @@ export function createLoop(env, options = {}) {
     return true;
   }
 
-  /** Ask, then write the row. The row is written by the workflow, never by her. */
+  /** Ask, then write the row. */
   async function arrive(text, { domain = null, ...askOptions } = {}) {
     const decided = await ask(env, text, askOptions);
     const at = clock().toISOString();
@@ -181,7 +168,7 @@ export function createLoop(env, options = {}) {
     return { id, key, at, domain, ...decided };
   }
 
-  /** His verdict. The only value in the row that does not come from her. */
+  /** The verdict: 1 or 0, and what it should have been. */
   async function feedback({ id, correct, correctedTo = null, result = null } = {}) {
     if (correct == null) throw new Error('feedback needs correct: true or false');
     if (id == null) throw new Error('feedback needs the row id');
@@ -211,7 +198,7 @@ export function createLoop(env, options = {}) {
     return { id: Number(id), correct: !!correct, correctedTo, key };
   }
 
-  /** Is she getting it right? Counted from the rows, nothing else. */
+  /** Counted from the rows. */
   async function progress(domain = null) {
     if (!db) return { correct: 0, wrong: 0, pending: 0, verdicts: 0, rate: null };
     const sql = `SELECT SUM(correct = 1) AS ok, SUM(correct = 0) AS bad, SUM(correct IS NULL) AS open, COUNT(*) AS total

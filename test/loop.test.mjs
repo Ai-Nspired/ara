@@ -66,14 +66,19 @@ async function build(answer, usage) {
   return { loop, store, env, fetchImpl };
 }
 
-test('she uses a paid decider and asks one choice question with a real catch-all', async () => {
+test('the decider is the paid one, never a :free slug', () => {
+  assert.equal(DECIDER, 'perplexity/pplx-decider-flash-v1.2');
+  assert.equal(DECIDER.includes(':free'), false);
+});
+
+test('one paid decider, one choice question, a real catch-all', async () => {
   const { loop, fetchImpl } = await build();
   await loop.arrive('make me an audit of the deed', { domain: 'legal', fetchImpl });
 
   const [{ url, body, headers }] = fetchImpl.calls;
   assert.equal(url, 'https://openrouter.ai/api/alpha/decisions');
   assert.equal(body.model, DECIDER);
-  assert.ok(!body.model.includes(':free'), 'never a free slug');
+  assert.equal(body.model.includes(':free'), false);
   assert.equal(Object.keys(body.questions).length, 1, 'one question, one pass');
   assert.equal(body.questions.intent.type, 'choice');
   assert.deepEqual(Object.keys(body.questions.intent.criteria), Object.keys(MOVES));

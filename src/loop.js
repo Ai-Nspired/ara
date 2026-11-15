@@ -45,6 +45,7 @@ export const SCHEMA = [
 export const SURFACES = {
   mind: {
     question: 'What is he wanting?',
+    store: 'truth',
     labels: {
       truth: 'Answer from the truth store',
       operator: 'Answer it',
@@ -67,6 +68,7 @@ export const SURFACES = {
   },
   cards: {
     question: 'What is he wanting?',
+    store: 'search',
     labels: {
       answer: 'Answer it',
       search: 'Search the web',
@@ -309,7 +311,7 @@ export function createLoop(env, options = {}) {
    * whether that was what he wanted. His reaction is evidence, not an answer:
    * the correction is his to judge, and hers to work out.
    */
-  async function review(domain, ask = null, idiom = null) {
+  async function review(domain, ask = null, idiom = null, store = null) {
     if (!db) return { text: '', count: 0 };
     let rows = [];
     try {
@@ -362,7 +364,19 @@ export function createLoop(env, options = {}) {
     }
 
     const ranked = Object.entries(per).sort((a, b) => (b[1].right - b[1].wrong) - (a[1].right - a[1].wrong) || b[1].n - a[1].n);
-    const lead = ranked[0] ? { move: ranked[0][0], ...ranked[0][1], shape: idiom ? idiom.name : null } : null;
+    let lead = ranked[0] ? { move: ranked[0][0], ...ranked[0][1], shape: idiom ? idiom.name : null } : null;
+
+    // A shape whose asks came back from the store is a lookup, not an unknown:
+    // "ask him" is the wrong answer for something that has already been answered.
+    const storedHere = shapeRows.filter((row) => row.outcome && String(row.outcome).includes('"stored"')).length;
+    if (store && storedHere && lead && lead.move === 'none') {
+      lead = { ...(per[store] || { n: 0, right: 0, wrong: 0, stored: 0 }), move: store, shape: idiom ? idiom.name : null };
+    }
+
+    const storeLine =
+      store && storedHere
+        ? `The run returned a stored answer for ${storedHere} of these asks: this shape is a lookup, and ${store} is the move that reads the store.\n`
+        : '';
 
     const shapeLine = ranked.length
       ? `Asks like this (${idiom ? idiom.name : 'this shape'}) before, ${shapeRows.length} of them: ` +
@@ -420,6 +434,7 @@ export function createLoop(env, options = {}) {
       text:
         carried +
         shapeLine +
+        storeLine +
         (seen ? `\nShe has chosen here before: ${seen}.\n\n` : '') +
         (lines.length ? 'What happened on the asks he has reacted to, and where the run showed the result:\n' + lines.join('\n') : '') +
         '\nDo not choose again a move he has already rejected for the same ask.',
@@ -432,7 +447,7 @@ export function createLoop(env, options = {}) {
   async function arrive(text, { domain = null, ...askOptions } = {}) {
     // She reviews everything he has judged before she decides again.
     const idiom = idiomOf(text);
-    const looked = await review(domain, text, idiom);
+    const looked = await review(domain, text, idiom, (SURFACES[askOptions.surface] || {}).store || null);
     const decided = await ask(env, text, { ...askOptions, review: looked.text });
     const at = clock().toISOString();
     const key = interactionKey(domain, at);

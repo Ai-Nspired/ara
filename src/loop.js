@@ -240,9 +240,11 @@ export async function ask(env, text, options = {}) {
 /** A stored "answer" that is really a question back at him. */
 function asksBackText(text) {
   const value = String(text || '').trim();
-  if (!value || value.length > 320) return false;
-  if (/\?\s*$/.test(value)) return true;
-  return /\b(what is the call|how would you like|do you want me to|please (specify|clarify)|let me know|can you clarify)\b/i.test(value);
+  if (!value) return false;
+  // No length limit: the long ones are the worst offenders, and dno000's stored
+  // text runs past three hundred characters before it gets to the question.
+  if (/\?["')\]]*\s*$/.test(value)) return true;
+  return /\b(what is the call|how would you like|do you want me to|please (specify|clarify)|let me know|can you clarify|clarification needed|intended action|resend|which one)\b/i.test(value);
 }
 
 /** A stored answer that was already there. One written moments ago is not that. */
@@ -595,9 +597,11 @@ export function createLoop(env, options = {}) {
       return {
         id, key, at, domain: picked, surface,
         move: decided.move || null,
+        text: `The store holds this for "${clip(String(text), 80)}", and it asks you back instead of answering:\n\n"${clip(String(held.answer), 240)}"`,
         question: `The store holds this for "${clip(String(text), 80)}", and it asks you back instead of answering:`,
         answer: clip(String(held.answer), 240),
         clarify: {
+          text: `The store holds this for "${clip(String(text), 80)}", and it asks you back instead of answering:\n\n"${clip(String(held.answer), 240)}"`,
           questions: [
             {
               id: 'want',

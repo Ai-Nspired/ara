@@ -46,55 +46,57 @@ export const SCHEMA = [
  */
 export const SURFACES = {
   mind: {
-    question: 'What is he wanting?',
+    // The question is not "which command" — it is what he is trying to get out
+    // of the thing he handed over. The options are results, not buttons.
+    question: 'He has presented this. What result is he trying to get?',
     store: 'truth',
     labels: {
-      truth: 'Answer from the truth store',
-      operator: 'Answer it',
+      truth: 'The stored answer, as it stands',
+      operator: 'An answer written now',
       mnl: 'The manual form',
-      doc: 'Lay it out as a document',
-      micro: 'Build a microsite',
-      style: 'A palette for the Stylist',
-      browse: 'Read the page first',
+      doc: 'A document he can send',
+      micro: 'A microsite he can open',
+      style: 'A palette, nothing else',
+      browse: 'The answer, after the page is read',
     },
     actions: {
-      truth: 'An answer from the truth store — the truth preset. A stored truth answers in place of a model.',
-      operator: 'An answer in the operator voice, written now.',
-      mnl: 'An answer as MNL — the manual form.',
-      doc: 'Material laid out as a document, in the doc preset.',
-      micro: 'A microsite, built in the micro preset.',
-      style: 'A palette, not an answer — colours and type for the Stylist.',
-      browse: 'Go and read a page on the web first, then answer from what it says.',
-      none: 'None of these. Say so rather than guess.',
+      truth: 'The answer the store already holds, handed back as it stands — no new writing.',
+      operator: 'A fresh answer written now, in his operator voice.',
+      mnl: 'The manual form of the answer — MNL.',
+      doc: 'A laid-out document, printable and sendable.',
+      micro: 'A built microsite he can open.',
+      style: 'A palette — colours and type — and no prose.',
+      browse: 'The page he pointed at, read first, and the answer drawn from it.',
+      none: 'None of these results.',
     },
   },
   cards: {
-    question: 'What is he wanting?',
+    question: 'He has presented this. What result is he trying to get?',
     store: 'search',
     labels: {
-      answer: 'Answer it',
-      search: 'Search the web',
-      fetch: 'Read a page',
-      card: 'Make a card',
-      merge: 'Merge cards',
-      split: 'Split a card',
-      template: 'Use a template',
-      style: 'Restyle a card',
-      magic: 'Tidy a card',
-      continue: 'Carry on with it',
+      answer: 'An answer on a card',
+      search: 'An answer from the web',
+      fetch: 'The page, on a card',
+      card: 'A new card',
+      merge: 'One card, not several',
+      split: 'Several cards, not one',
+      template: 'A card in his template',
+      style: 'A card in a style he named',
+      magic: 'A card that is tighter',
+      continue: 'A card carried on',
     },
     actions: {
-      answer: 'Answer it, written now, on a card.',
-      search: 'Search the web and answer from what comes back.',
-      fetch: 'Read a page he named and put it on a card.',
-      card: 'Make a card from what he supplied.',
-      merge: 'Combine cards already on the table into one.',
-      split: 'Break one card into two or three.',
-      template: 'Lay a card out in one of his saved templates.',
-      style: 'Rewrite a card in the style he named — a theme, a palette, a mood.',
-      magic: 'Tighten and clear up a card that already exists.',
-      continue: 'Carry an existing card on to the next step.',
-      none: 'None of these. Say so rather than guess.',
+      answer: 'An answer written onto a card.',
+      search: 'An answer that comes from the web, searched now.',
+      fetch: 'The contents of a page he named, put on a card.',
+      card: 'A new card made from what he supplied.',
+      merge: 'One card where there were several.',
+      split: 'Several cards where there was one.',
+      template: 'A card laid out in one of his saved templates.',
+      style: 'A card rewritten in the style he named — a theme, a palette, a mood.',
+      magic: 'A card that is tighter and clearer than the one on the table.',
+      continue: 'An existing card carried on to its next step.',
+      none: 'None of these results.',
     },
   },
 };
@@ -301,7 +303,7 @@ export function idiomOf(text) {
 
 /** His logic, as her criteria: stated beats pattern, pattern beats guessing. */
 const IDIOM_RULE =
-  'If he states what he wants, that is the answer. If asks of this shape have gone one way before, that is where this one goes. If it is new and not clear, choose none.';
+  'If he states the result he wants, that is the answer. If asks of this shape have got one result before, that is the result here. If it is new and not clear, choose none.';
 
 // The domains are a list she keeps, not a taxonomy this file invents: every
 // domain is a KV key under `domain:`, carrying its own metadata — when it was

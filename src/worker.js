@@ -10,7 +10,7 @@
 //   POST /resolve?stream=1  → SSE stream
 //   GET  /health            → { status, kv, latencyMs }
 
-import { createLoop } from './loop.js';
+import { createLoop, idiomOf } from './loop.js';
 
 const MAX_LOOPS = 3;
 
@@ -256,7 +256,8 @@ export default {
     if (url.pathname === "/feedback" && request.method === "POST") return handleFeedback(request, env);
     if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
     if (url.pathname === "/review" && request.method === "GET") {
-      return json(await loopFor(env).review(url.searchParams.get("domain") || null));
+      const ask = url.searchParams.get("ask");
+      return json(await loopFor(env).review(url.searchParams.get("domain") || null, ask, ask ? idiomOf(ask) : null));
     }
     if (url.pathname === "/progress" && request.method === "GET") return handleProgress(url, env);
     if (url.pathname === "/recent" && request.method === "GET") return handleRecent(url, env);

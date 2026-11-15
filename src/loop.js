@@ -24,11 +24,13 @@ export const SCHEMA = [
   decided       TEXT,
   correct       INTEGER,
   corrected_to  TEXT,
-  outcome       TEXT
+  outcome       TEXT,
+  idiom         TEXT
 )`,
   `CREATE INDEX IF NOT EXISTS decisions_domain_at ON decisions (domain, at)`,
   // Added after the table existed; fails harmlessly on a table that has it.
   `ALTER TABLE decisions ADD COLUMN outcome TEXT`,
+  `ALTER TABLE decisions ADD COLUMN idiom TEXT`,
 ];
 
 
@@ -182,7 +184,7 @@ export async function ask(env, text, options = {}) {
       questions: {
         intent: {
           type: 'choice',
-          instructions: surface ? surface.question : INTENT_QUESTION,
+          instructions: (surface ? surface.question : INTENT_QUESTION) + ' ' + IDIOM_RULE,
           criteria: asked,
         },
         ...(surface ? {} : {
@@ -246,6 +248,45 @@ function describeOutcome(row) {
  * keeps it beside the row, so her own record carries both what she chose and
  * what came of it.
  */
+// The shape of an ask, which is what his idiom is made of: a bare code is a
+// lookup, a question is a question, a verb first is an instruction. Consensus is
+// counted per shape, so a pattern learned on one ask carries to the next one of
+// the same shape.
+const VERBS = new Set([
+  'make', 'change', 'add', 'remove', 'delete', 'split', 'merge', 'fix', 'set', 'turn',
+  'show', 'give', 'write', 'read', 'open', 'close', 'bump', 'restyle', 'tidy', 'carry',
+  'keep', 'use', 'send', 'take', 'put', 'move', 'copy', 'list', 'find', 'search', 'check',
+]);
+
+const IDIOM_NAMES = {
+  code: 'a bare code',
+  reference: 'a reference',
+  question: 'a question',
+  instruction: 'an instruction',
+  short: 'a short phrase',
+  statement: 'a statement',
+  empty: 'nothing',
+};
+
+export function idiomOf(text) {
+  const raw = String(text || '').trim();
+  const low = raw.toLowerCase();
+  if (!raw) return { kind: 'empty', name: IDIOM_NAMES.empty };
+  if (/^https?:\/\//i.test(raw) || /^\/[^\s]*$/.test(raw)) return { kind: 'reference', name: IDIOM_NAMES.reference };
+  if (raw.split(/\s+/).length === 1 && /^[a-z]{1,8}[-_]?\d{2,}$/i.test(raw)) return { kind: 'code', name: IDIOM_NAMES.code };
+  if (/\?$/.test(raw) || /^(what|why|how|when|where|who|which|is|are|does|do|can|could|should|would|will)\b/i.test(low)) {
+    return { kind: 'question', name: IDIOM_NAMES.question };
+  }
+  const first = low.split(/\s+/)[0].replace(/[^a-z]/g, '');
+  if (VERBS.has(first)) return { kind: 'instruction', name: IDIOM_NAMES.instruction };
+  if (raw.length <= 24 && raw.split(/\s+/).length <= 2) return { kind: 'short', name: IDIOM_NAMES.short };
+  return { kind: 'statement', name: IDIOM_NAMES.statement };
+}
+
+/** His logic, as her criteria: stated beats pattern, pattern beats guessing. */
+const IDIOM_RULE =
+  'If he states what he wants, that is the answer. If asks of this shape have gone one way before, that is where this one goes. If it is new and not clear, choose none.';
+
 export function createLoop(env, options = {}) {
   const clock = options.clock || (() => new Date());
   const db = env && env.DB ? env.DB : null;
@@ -268,7 +309,7 @@ export function createLoop(env, options = {}) {
    * whether that was what he wanted. His reaction is evidence, not an answer:
    * the correction is his to judge, and hers to work out.
    */
-  async function review(domain, ask = null) {
+  async function review(domain, ask = null, idiom = null) {
     if (!db) return { text: '', count: 0 };
     let rows = [];
     try {
@@ -297,6 +338,45 @@ export function createLoop(env, options = {}) {
     } catch {
       tally = [];
     }
+
+    // Consensus by shape: what has happened to asks of this kind before.
+    let shapeRows = [];
+    try {
+      const recent = domain
+        ? db.prepare('SELECT asked, decided, correct, outcome FROM decisions WHERE domain = ? ORDER BY at DESC, id DESC LIMIT 80').bind(domain)
+        : db.prepare('SELECT asked, decided, correct, outcome FROM decisions ORDER BY at DESC, id DESC LIMIT 80');
+      const out = await recent.all();
+      const all = out?.results || out || [];
+      if (idiom) shapeRows = all.filter((row) => row && row.decided && idiomOf(row.asked).kind === idiom.kind);
+    } catch {
+      shapeRows = [];
+    }
+
+    const per = {};
+    for (const row of shapeRows) {
+      const slot = (per[row.decided] = per[row.decided] || { n: 0, right: 0, wrong: 0, stored: 0 });
+      slot.n += 1;
+      if (row.correct != null && Number(row.correct) === 1) slot.right += 1;
+      if (row.correct != null && Number(row.correct) === 0) slot.wrong += 1;
+      if (row.outcome && String(row.outcome).includes('"stored"')) slot.stored += 1;
+    }
+
+    const ranked = Object.entries(per).sort((a, b) => (b[1].right - b[1].wrong) - (a[1].right - a[1].wrong) || b[1].n - a[1].n);
+    const lead = ranked[0] ? { move: ranked[0][0], ...ranked[0][1], shape: idiom ? idiom.name : null } : null;
+
+    const shapeLine = ranked.length
+      ? `Asks like this (${idiom ? idiom.name : 'this shape'}) before, ${shapeRows.length} of them: ` +
+        ranked
+          .map(([move, slot]) => {
+            const bits = [];
+            if (slot.stored) bits.push(`the run returned a stored answer ${slot.stored}`);
+            if (slot.right) bits.push(`he wanted it ${slot.right}`);
+            if (slot.wrong) bits.push(`he did not want it ${slot.wrong}`);
+            return `${move} ${slot.n}${bits.length ? ' (' + bits.join(', ') + ')' : ''}`;
+          })
+          .join('; ') +
+        '.\n'
+      : '';
 
     const seen = tally
       .filter((row) => row && row.decided)
@@ -339,18 +419,20 @@ export function createLoop(env, options = {}) {
     return {
       text:
         carried +
-        (seen ? `She has chosen here before: ${seen}.\n\n` : '') +
-        'What happened on the asks he has reacted to, and where the run showed the result:\n' +
-        lines.join('\n') +
+        shapeLine +
+        (seen ? `\nShe has chosen here before: ${seen}.\n\n` : '') +
+        (lines.length ? 'What happened on the asks he has reacted to, and where the run showed the result:\n' + lines.join('\n') : '') +
         '\nDo not choose again a move he has already rejected for the same ask.',
-      count: lines.length,
+      count: lines.length + shapeRows.length,
+      consensus: lead,
     };
   }
 
   /** Ask, then write the row. */
   async function arrive(text, { domain = null, ...askOptions } = {}) {
     // She reviews everything he has judged before she decides again.
-    const looked = await review(domain, text);
+    const idiom = idiomOf(text);
+    const looked = await review(domain, text, idiom);
     const decided = await ask(env, text, { ...askOptions, review: looked.text });
     const at = clock().toISOString();
     const key = interactionKey(domain, at);
@@ -358,8 +440,8 @@ export function createLoop(env, options = {}) {
     let id = null;
     if (db) {
       const result = await db
-        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(at, domain, String(text), decided.move, null, null)
+        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(at, domain, String(text), decided.move, null, null, idiom.kind)
         .run();
       id = rowId(result);
     }
@@ -370,7 +452,7 @@ export function createLoop(env, options = {}) {
         refused: decided.refused, confidence: decided.confidence, routeConfidence: decided.routeConfidence,
         probabilities: decided.probabilities, routes: decided.routes,
         cost: decided.cost, model: decided.model, correct: null, id,
-        reviewed: looked.count,
+        reviewed: looked.count, idiom: idiom.kind, consensus: looked.consensus || null,
       };
       // No expirationTtl: this is a record.
       await kv.put(key, JSON.stringify(body), { metadata: metadataFor(body) });
@@ -383,6 +465,8 @@ export function createLoop(env, options = {}) {
       id, key, at, domain,
       move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost,
       reviewed: looked.count,
+      idiom: idiom.kind,
+      consensus: looked.consensus || null,
       question: face ? face.question : null,
       options: face && face.labels ? Object.values(face.labels) : null,
     };

@@ -175,7 +175,7 @@ export async function ask(env, text, options = {}) {
     },
     body: JSON.stringify({
       model,
-      state: String(text),
+      state: options.review ? String(text) + '\n\n' + options.review : String(text),
       questions: {
         intent: {
           type: 'choice',
@@ -232,9 +232,51 @@ export function createLoop(env, options = {}) {
     return true;
   }
 
+  /**
+   * What he has already judged, in his own terms: the ask, what she decided, and
+   * what it should have been. This is the whole of the learning — no scores, no
+   * weights, just his verdicts, read back before she decides again.
+   */
+  async function review(domain) {
+    if (!db) return { text: '', count: 0 };
+    let rows = [];
+    try {
+      const statement = domain
+        ? db.prepare(
+            'SELECT asked, decided, correct, corrected_to FROM decisions WHERE correct IS NOT NULL AND domain = ? ORDER BY at DESC, id DESC LIMIT 12',
+          ).bind(domain)
+        : db.prepare(
+            'SELECT asked, decided, correct, corrected_to FROM decisions WHERE correct IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
+          );
+      const out = await statement.all();
+      rows = out?.results || out || [];
+    } catch {
+      return { text: '', count: 0 };
+    }
+    if (!rows.length) return { text: '', count: 0 };
+
+    const lines = rows
+      .filter((row) => row && row.asked)
+      .map((row) => {
+        const asked = clip(row.asked, 140);
+        if (Number(row.correct) === 1) return `- right: "${asked}" → ${row.decided}`;
+        const should = row.corrected_to ? String(row.corrected_to) : 'something else';
+        return `- wrong: "${asked}" → ${row.decided}; it should have been ${should}`;
+      });
+
+    return {
+      text:
+        'He has judged these before in this surface. Take the corrections as what he actually wants:\n' +
+        lines.join('\n'),
+      count: lines.length,
+    };
+  }
+
   /** Ask, then write the row. */
   async function arrive(text, { domain = null, ...askOptions } = {}) {
-    const decided = await ask(env, text, askOptions);
+    // She reviews everything he has judged before she decides again.
+    const looked = await review(domain);
+    const decided = await ask(env, text, { ...askOptions, review: looked.text });
     const at = clock().toISOString();
     const key = interactionKey(domain, at);
 
@@ -253,6 +295,7 @@ export function createLoop(env, options = {}) {
         refused: decided.refused, confidence: decided.confidence, routeConfidence: decided.routeConfidence,
         probabilities: decided.probabilities, routes: decided.routes,
         cost: decided.cost, model: decided.model, correct: null, id,
+        reviewed: looked.count,
       };
       // No expirationTtl: this is a record.
       await kv.put(key, JSON.stringify(body), { metadata: metadataFor(body) });
@@ -264,6 +307,7 @@ export function createLoop(env, options = {}) {
     return {
       id, key, at, domain,
       move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost,
+      reviewed: looked.count,
       question: face ? face.question : null,
       options: face && face.labels ? Object.values(face.labels) : null,
     };

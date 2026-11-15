@@ -318,6 +318,8 @@ async function handleDecide(request, env) {
     const result = await loopFor(env).arrive(text, {
       domain: body.domain || null,
       surface: body.surface || body.domain || null,
+      // His tap on the card she wrote comes back as the decision.
+      forced: body.choice || null,
     });
     return json(result);
   } catch (error) {

@@ -533,7 +533,10 @@ export function createLoop(env, options = {}) {
     const choices = known.length ? known : ['general'];
     const store = (SURFACES[surface] || {}).store || null;
     const looked = await review(domain, text, idiom, store, choices);
-    const decided = await ask(env, text, { ...askOptions, review: looked.text, domains: choices });
+    // He answered her card: that answer is the decision, and no decider is billed.
+    const decided = askOptions.forced
+      ? { move: askOptions.forced, scope: null, route: null, refused: false, cost: 0, model: 'his-answer' }
+      : await ask(env, text, { ...askOptions, review: looked.text, domains: choices });
     // Her identification wins when it is a domain he has put in the list.
     const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
     const at = clock().toISOString();

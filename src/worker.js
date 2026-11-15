@@ -291,7 +291,10 @@ async function handleDecide(request, env) {
   const text = body.text || body.prompt || "";
   if (!text) return json({ error: "text_required" }, 400);
   try {
-    const result = await loopFor(env).arrive(text, { domain: body.domain || null });
+    const result = await loopFor(env).arrive(text, {
+      domain: body.domain || null,
+      surface: body.surface || body.domain || null,
+    });
     return json(result);
   } catch (error) {
     return json({ error: "decide_failed", message: String(error.message || error) }, 502);

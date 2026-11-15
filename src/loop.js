@@ -28,6 +28,47 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS decisions_domain_at ON decisions (domain, at)`,
 ];
 
+
+/**
+ * What she is choosing between is what the surface in front of her can actually
+ * do — not a generic menu. mind has its presets and its browser; cards has the
+ * table and the things he does to a card. A surface with no table falls back to
+ * the generic moves below.
+ *
+ * `none` is always a real option: if the ask is not any of these, she says so.
+ */
+export const SURFACES = {
+  mind: {
+    question: 'What is he wanting?',
+    actions: {
+      truth: 'An answer from the truth store — the truth preset. A stored truth answers in place of a model.',
+      operator: 'An answer in the operator voice, written now.',
+      mnl: 'An answer as MNL — the manual form.',
+      doc: 'Material laid out as a document, in the doc preset.',
+      micro: 'A microsite, built in the micro preset.',
+      style: 'A palette, not an answer — colours and type for the Stylist.',
+      browse: 'Go and read a page on the web first, then answer from what it says.',
+      none: 'None of these. Say so rather than guess.',
+    },
+  },
+  cards: {
+    question: 'What is he wanting?',
+    actions: {
+      answer: 'Answer it, written now, on a card.',
+      search: 'Search the web and answer from what comes back.',
+      fetch: 'Read a page he named and put it on a card.',
+      card: 'Make a card from what he supplied.',
+      merge: 'Combine cards already on the table into one.',
+      split: 'Break one card into two or three.',
+      template: 'Lay a card out in one of his saved templates.',
+      style: 'Rewrite a card in the style he named — a theme, a palette, a mood.',
+      magic: 'Tighten and clear up a card that already exists.',
+      continue: 'Carry an existing card on to the next step.',
+      none: 'None of these. Say so rather than guess.',
+    },
+  },
+};
+
 /** The menu: a definition per option, with `none` as a real catch-all. */
 export const MOVES = {
   card: 'The ask names something this workspace already does with a card: an audit, a merge, a distill, a fetch, a search. If it could be done by clicking something that already exists, it is this.',
@@ -97,6 +138,8 @@ export async function ask(env, text, options = {}) {
   if (!text) throw new Error('ask needs what was asked');
   const fetchImpl = options.fetchImpl || fetch;
   const routes = options.routes || ROUTES;
+  const surface = SURFACES[options.surface] || null;
+  const asked = options.moves || (surface ? surface.actions : MOVES);
   // Two questions are answered jointly, so the state is billed once.
   const model = options.model || JOINT_DECIDER;
   const moves = options.moves || MOVES;
@@ -115,14 +158,16 @@ export async function ask(env, text, options = {}) {
       questions: {
         intent: {
           type: 'choice',
-          instructions: INTENT_QUESTION,
-          criteria: moves,
+          instructions: surface ? surface.question : INTENT_QUESTION,
+          criteria: asked,
         },
-        route: {
-          type: 'choice',
-          instructions: ROUTE_QUESTION,
-          criteria: routes,
-        },
+        ...(surface ? {} : {
+          route: {
+            type: 'choice',
+            instructions: ROUTE_QUESTION,
+            criteria: routes,
+          },
+        }),
       },
     }),
   });
@@ -194,7 +239,9 @@ export function createLoop(env, options = {}) {
 
     // She answers; the row is what gets written. No probabilities ride out.
     // What the decider billed rides out; what it thought of him does not.
-    return { id, key, at, domain, move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost };
+    return {
+      id, key, at, domain, move: decided.move, route: decided.route, refused: decided.refused, cost: decided.cost,
+    };
   }
 
   /** The verdict: 1 or 0, and what it should have been. */

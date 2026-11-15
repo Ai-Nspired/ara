@@ -84,7 +84,7 @@ test('label and route in one paid pass, with a real catch-all', async () => {
   assert.equal(url, 'https://openrouter.ai/api/alpha/decisions');
   assert.equal(body.model, JOINT_DECIDER, 'two questions are answered jointly, so the state bills once');
   assert.equal(body.model.includes(':free'), false);
-  assert.deepEqual(Object.keys(body.questions), ['intent', 'route'], 'label and route, one pass');
+  assert.deepEqual(Object.keys(body.questions), ['intent', 'route'], 'two questions, one paid pass');
   assert.equal(body.questions.intent.type, 'choice');
   assert.deepEqual(Object.keys(body.questions.intent.criteria), Object.keys(MOVES));
   assert.ok(body.questions.intent.criteria.none, 'the catch-all is a real option');

@@ -533,10 +533,21 @@ export function createLoop(env, options = {}) {
     const choices = known.length ? known : ['general'];
     const store = (SURFACES[surface] || {}).store || null;
     const looked = await review(domain, text, idiom, store, choices);
+
+    // What the store already holds, handed over before she decides. Nothing is
+    // generated to find this out: a pair that already exists is either the
+    // result, or it is not and she has to ask him.
+    const held = askOptions.stored && askOptions.stored.answer ? askOptions.stored : null;
+    const heldNote = held
+      ? `The store already holds this ask: "${clip(String(held.answer), 220)}" (layer ${held.layer}${held.key ? `, ${held.key}` : ''}). ` +
+        'If that is the result he is after, result is the answer. If it comes back as a question instead of an answer, or it was never verified, it is not the result: ask him.'
+      : '';
+    const seen = heldNote ? `${heldNote}\n\n${looked.text}` : looked.text;
+
     // He answered her card: that answer is the decision, and no decider is billed.
     const decided = askOptions.forced
       ? { move: askOptions.forced, scope: null, route: null, refused: false, cost: 0, model: 'his-answer' }
-      : await ask(env, text, { ...askOptions, review: looked.text, domains: choices });
+      : await ask(env, text, { ...askOptions, review: seen, domains: choices });
     // Her identification wins when it is a domain he has put in the list.
     const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
     const at = clock().toISOString();

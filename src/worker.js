@@ -320,6 +320,8 @@ async function handleDecide(request, env) {
       surface: body.surface || body.domain || null,
       // His tap on the card she wrote comes back as the decision.
       forced: body.choice || null,
+      // What is already stored, read before she decides, never generated for.
+      stored: body.stored || null,
     });
     return json(result);
   } catch (error) {

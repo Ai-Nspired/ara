@@ -196,7 +196,8 @@ export async function ask(env, text, options = {}) {
               scope: {
                 type: 'choice',
                 instructions: 'Which domain is he asking in?',
-                criteria: options.domains,
+                // criteria is a record: the option, and what it means.
+                criteria: Object.fromEntries(options.domains.map((name) => [name, name])),
               },
             }
           : {}),

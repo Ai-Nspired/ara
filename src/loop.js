@@ -54,11 +54,13 @@ export const SURFACES = {
       result: 'A result produced',
       preset: 'A preset run',
       ask: 'Something he is asking',
+      unclear: 'I am not sure — ask me',
     },
     actions: {
       result: 'A result — the thing itself, produced: what the store already holds, or the artifact built. No new prose.',
       preset: 'One of his presets, run as that preset — he says which, or the client already has it selected.',
       ask: 'He is asking something, and the answer is written now.',
+      unclear: 'You cannot tell which of these he is after. Say so: he is asked with these as the options, and nothing is written.',
     },
   },
   cards: {
@@ -563,6 +565,29 @@ export function createLoop(env, options = {}) {
     // She answers; the row is what gets written. No probabilities ride out.
     // What the decider billed rides out; what it thought of him does not.
     const face = SURFACES[askOptions.surface] || null;
+
+    // Not understanding is not a guess. She says so, the card asks him, and
+    // nothing behind her runs.
+    if (face && (decided.move === 'unclear' || decided.refused)) {
+      return {
+        id, key, at, domain: picked, surface,
+        move: decided.move || null,
+        question: face.question,
+        clarify: {
+          questions: [
+            {
+              id: 'want',
+              q: face.question,
+              // Her own "I am not sure" is not one of his options.
+              options: Object.entries(face.labels)
+                .filter(([value]) => value !== 'unclear')
+                .map(([value, label]) => ({ value, label })),
+            },
+          ],
+        },
+      };
+    }
+
     return {
       id, key, at, domain,
       move: decided.move, domain: picked, surface, route: decided.route, refused: decided.refused, cost: decided.cost,

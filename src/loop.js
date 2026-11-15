@@ -339,10 +339,10 @@ export function createLoop(env, options = {}) {
     try {
       const statement = domain
         ? db.prepare(
-            'SELECT asked, decided, correct, outcome FROM decisions WHERE (correct IS NOT NULL OR outcome IS NOT NULL) AND (surface = ? OR (surface IS NULL AND domain = ?)) ORDER BY at DESC, id DESC LIMIT 12',
+            'SELECT asked, decided, correct, corrected_to, outcome FROM decisions WHERE (correct IS NOT NULL OR outcome IS NOT NULL) AND (surface = ? OR (surface IS NULL AND domain = ?)) ORDER BY at DESC, id DESC LIMIT 12',
           ).bind(domain, domain)
         : db.prepare(
-            'SELECT asked, decided, correct, outcome FROM decisions WHERE correct IS NOT NULL OR outcome IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
+            'SELECT asked, decided, correct, corrected_to, outcome FROM decisions WHERE correct IS NOT NULL OR outcome IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
           );
       const out = await statement.all();
       rows = out?.results || out || [];
@@ -461,7 +461,12 @@ export function createLoop(env, options = {}) {
         if (happened) parts.push(happened);
         // A row he has not judged is not a rejection: Number(null) is 0.
         if (row.correct != null && Number(row.correct) === 1) parts.push('he said that was what he wanted');
-        else if (row.correct != null && Number(row.correct) === 0) parts.push('he said that was not what he wanted');
+        else if (row.correct != null && Number(row.correct) === 0) {
+          parts.push('he said that was not what he wanted');
+          // His own words for what it should have been. This is his correction,
+          // not an answer supplied from outside: it is the record he made.
+          if (row.corrected_to) parts.push(`he said the result should have been: ${row.corrected_to}`);
+        }
         return `- "${asked}" → ${parts.join('; ')}`;
       });
 
@@ -474,7 +479,11 @@ export function createLoop(env, options = {}) {
           .slice(0, 4)
           .map((row) => {
             const did = describeOutcome(row);
-            const said = row.correct != null ? (Number(row.correct) === 1 ? ', which he wanted' : ', which he did not') : '';
+            const said = row.correct != null
+              ? Number(row.correct) === 1
+                ? ', which he wanted'
+                : ', which he did not' + (row.corrected_to ? ' (he said it should have been ' + row.corrected_to + ')' : '')
+              : '';
             return `${row.decided}${said}${did ? ' (' + did + ')' : ''}`;
           })
           .join('; ') +

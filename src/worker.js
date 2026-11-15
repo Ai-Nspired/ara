@@ -257,8 +257,7 @@ export default {
     if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
     if (url.pathname === "/domains") {
       if (request.method === "GET") {
-        const list = await loopFor(env).domains();
-        return json({ domains: list });
+        return json({ domains: await loopFor(env).domainRecords() });
       }
       if (request.method === "POST") {
         let body;

@@ -561,6 +561,22 @@ export function createLoop(env, options = {}) {
     }
   }
 
+  /** The list as she tracks it: name, when it was first and last seen, and the moves. */
+  async function domainRecords() {
+    if (!kv) return [];
+    try {
+      const listed = await kv.list({ prefix: DOMAIN_PREFIX });
+      return (listed?.keys || []).map((entry) => ({
+        name: (entry.metadata && entry.metadata.name) || String(entry.name || '').slice(DOMAIN_PREFIX.length),
+        seen: (entry.metadata && entry.metadata.seen) || 0,
+        last: (entry.metadata && entry.metadata.last) || null,
+        moves: (entry.metadata && entry.metadata.moves) || {},
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   /** Add a domain to the list. The body and the metadata carry the same record. */
   async function addDomain(name) {
     if (!kv) throw new Error('no KV binding');
@@ -694,5 +710,5 @@ export function createLoop(env, options = {}) {
     }
   }
 
-  return { ensure, arrive, outcome, feedback, progress, recent, detail, review, domains, addDomain };
+  return { ensure, arrive, outcome, feedback, progress, recent, detail, review, domains, domainRecords, addDomain };
 }

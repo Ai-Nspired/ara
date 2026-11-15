@@ -73,11 +73,23 @@ config that is behind the deployment.
 
 ## 4. Access — use it before asking
 
-**GitHub.** `GITHUB_PAT` is in the environment. Clone and push with an askpass helper
-so the token never appears in a URL: the helper prints `x-access-token` then
-`$GITHUB_PAT`, and `GIT_ASKPASS=/tmp/askpass.sh git push origin HEAD:main`.
-Identity inside the repo: `dno-luigi <dno@ai-n.org>`. Recreate the helper when
-needed — `/tmp` does not survive.
+**GitHub.** `GITHUB_PAT` is in the environment. Clone and push with an askpass helper so
+the token never appears in a URL. The helper must answer **one** prompt — printing the
+username and the token together makes git send the username as the password, and GitHub
+answers `Invalid username or token`, which looks exactly like a dead token:
+
+```sh
+#!/bin/sh
+case "$1" in
+  *sername*) echo "x-access-token" ;;
+  *) echo "$GITHUB_PAT" ;;
+esac
+```
+
+`GIT_ASKPASS=/tmp/askpass.sh git push origin HEAD:main`. Identity inside the repo:
+`dno-luigi <dno@ai-n.org>`. Recreate the helper when needed — `/tmp` does not survive.
+Test a token without git: `curl -s -o /dev/null -w '%{http_code}' -H
+"Authorization: Bearer $GITHUB_PAT" https://api.github.com/user` — 200 means it is alive.
 
 **Cloudflare.** `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ID` are in the environment, so
 `wrangler` works with no login: `deploy`, `deployments`, `tail`, KV / D1 / R2.

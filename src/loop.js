@@ -233,9 +233,9 @@ export function createLoop(env, options = {}) {
   }
 
   /**
-   * What he has already judged, in his own terms: the ask, what she decided, and
-   * what it should have been. This is the whole of the learning — no scores, no
-   * weights, just his verdicts, read back before she decides again.
+   * What he has already said, in his own terms: the ask, what she gave him, and
+   * whether that was what he wanted. His reaction is evidence, not an answer:
+   * the correction is his to judge, and hers to work out.
    */
   async function review(domain) {
     if (!db) return { text: '', count: 0 };
@@ -243,10 +243,10 @@ export function createLoop(env, options = {}) {
     try {
       const statement = domain
         ? db.prepare(
-            'SELECT asked, decided, correct, corrected_to FROM decisions WHERE correct IS NOT NULL AND domain = ? ORDER BY at DESC, id DESC LIMIT 12',
+            'SELECT asked, decided, correct FROM decisions WHERE correct IS NOT NULL AND domain = ? ORDER BY at DESC, id DESC LIMIT 12',
           ).bind(domain)
         : db.prepare(
-            'SELECT asked, decided, correct, corrected_to FROM decisions WHERE correct IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
+            'SELECT asked, decided, correct FROM decisions WHERE correct IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
           );
       const out = await statement.all();
       rows = out?.results || out || [];
@@ -259,14 +259,15 @@ export function createLoop(env, options = {}) {
       .filter((row) => row && row.asked)
       .map((row) => {
         const asked = clip(row.asked, 140);
-        if (Number(row.correct) === 1) return `- right: "${asked}" → ${row.decided}`;
-        const should = row.corrected_to ? String(row.corrected_to) : 'something else';
-        return `- wrong: "${asked}" → ${row.decided}; it should have been ${should}`;
+        if (Number(row.correct) === 1) {
+          return `- "${asked}" → he was given ${row.decided}, and that was what he wanted`;
+        }
+        return `- "${asked}" → he was given ${row.decided}, and that was not what he wanted`;
       });
 
     return {
       text:
-        'He has judged these before in this surface. Take the corrections as what he actually wants:\n' +
+        'What he has said about these before, in his own words. Nothing here tells you what to pick:\n' +
         lines.join('\n'),
       count: lines.length,
     };

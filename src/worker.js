@@ -254,6 +254,7 @@ export default {
     }
     if (url.pathname === "/decide" && request.method === "POST") return handleDecide(request, env);
     if (url.pathname === "/feedback" && request.method === "POST") return handleFeedback(request, env);
+    if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
     if (url.pathname === "/progress" && request.method === "GET") return handleProgress(url, env);
     if (url.pathname === "/recent" && request.method === "GET") return handleRecent(url, env);
     return new Response("ara-engine-active", { headers: { "Content-Type": "text/plain" } });
@@ -319,6 +320,27 @@ async function handleFeedback(request, env) {
     }));
   } catch (error) {
     return json({ error: "feedback_failed", message: String(error.message || error) }, 400);
+  }
+}
+
+// POST /outcome {id, returned, stored?, route?} — what the decision produced.
+async function handleOutcome(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+  if (body.id == null) return json({ error: "id_required" }, 400);
+  try {
+    return json(await loopFor(env).outcome({
+      id: body.id,
+      returned: body.returned ?? null,
+      stored: body.stored ?? null,
+      route: body.route ?? null,
+    }));
+  } catch (error) {
+    return json({ error: "outcome_failed", message: String(error.message || error) }, 400);
   }
 }
 

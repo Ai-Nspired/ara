@@ -23,9 +23,12 @@ export const SCHEMA = [
   asked         TEXT NOT NULL,
   decided       TEXT,
   correct       INTEGER,
-  corrected_to  TEXT
+  corrected_to  TEXT,
+  outcome       TEXT
 )`,
   `CREATE INDEX IF NOT EXISTS decisions_domain_at ON decisions (domain, at)`,
+  // Added after the table existed; fails harmlessly on a table that has it.
+  `ALTER TABLE decisions ADD COLUMN outcome TEXT`,
 ];
 
 
@@ -221,6 +224,28 @@ export async function ask(env, text, options = {}) {
   };
 }
 
+/** What the run produced, for a row that has been told. Evidence, not advice. */
+function describeOutcome(row) {
+  if (!row || !row.outcome) return '';
+  let out = null;
+  try {
+    out = typeof row.outcome === 'string' ? JSON.parse(row.outcome) : row.outcome;
+  } catch {
+    return '';
+  }
+  if (!out) return '';
+  if (out.stored) return `the run returned a stored ${out.stored} answer`;
+  if (out.returned === 'generated') return 'the run wrote a new answer';
+  if (out.returned) return `the run returned ${out.returned}`;
+  if (out.returned === false || out.returned === 'nothing') return 'the run returned nothing';
+  return '';
+}
+
+/**
+ * What a decision actually produced. The product reports it after the fact; she
+ * keeps it beside the row, so her own record carries both what she chose and
+ * what came of it.
+ */
 export function createLoop(env, options = {}) {
   const clock = options.clock || (() => new Date());
   const db = env && env.DB ? env.DB : null;
@@ -228,7 +253,13 @@ export function createLoop(env, options = {}) {
 
   async function ensure() {
     if (!db) return false;
-    for (const statement of SCHEMA) await db.prepare(statement).run();
+    for (const statement of SCHEMA) {
+      try {
+        await db.prepare(statement).run();
+      } catch {
+        // A column that is already there, or an index that already exists.
+      }
+    }
     return true;
   }
 
@@ -243,10 +274,10 @@ export function createLoop(env, options = {}) {
     try {
       const statement = domain
         ? db.prepare(
-            'SELECT asked, decided, correct FROM decisions WHERE correct IS NOT NULL AND domain = ? ORDER BY at DESC, id DESC LIMIT 12',
+            'SELECT asked, decided, correct, outcome FROM decisions WHERE (correct IS NOT NULL OR outcome IS NOT NULL) AND domain = ? ORDER BY at DESC, id DESC LIMIT 12',
           ).bind(domain)
         : db.prepare(
-            'SELECT asked, decided, correct FROM decisions WHERE correct IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
+            'SELECT asked, decided, correct, outcome FROM decisions WHERE correct IS NOT NULL OR outcome IS NOT NULL ORDER BY at DESC, id DESC LIMIT 12',
           );
       const out = await statement.all();
       rows = out?.results || out || [];
@@ -259,10 +290,12 @@ export function createLoop(env, options = {}) {
       .filter((row) => row && row.asked)
       .map((row) => {
         const asked = clip(row.asked, 140);
-        if (Number(row.correct) === 1) {
-          return `- "${asked}" → he was given ${row.decided}, and that was what he wanted`;
-        }
-        return `- "${asked}" → he was given ${row.decided}, and that was not what he wanted`;
+        const parts = [`she chose ${row.decided}`];
+        const happened = describeOutcome(row);
+        if (happened) parts.push(happened);
+        if (Number(row.correct) === 1) parts.push('he said that was what he wanted');
+        else if (Number(row.correct) === 0) parts.push('he said that was not what he wanted');
+        return `- "${asked}" → ${parts.join('; ')}`;
       });
 
     return {
@@ -312,6 +345,33 @@ export function createLoop(env, options = {}) {
       question: face ? face.question : null,
       options: face && face.labels ? Object.values(face.labels) : null,
     };
+  }
+
+  /** The product reports what the decision produced, after it produced it. */
+  async function outcome({ id, returned = null, stored = null, route = null } = {}) {
+    if (id == null) throw new Error('outcome needs the row id');
+    const what = { returned, stored, route, at: clock().toISOString() };
+
+    if (db) {
+      await db
+        .prepare('UPDATE decisions SET outcome = ? WHERE id = ?')
+        .bind(JSON.stringify(what), Number(id))
+        .run();
+    }
+
+    let row = null;
+    if (db) row = await db.prepare('SELECT * FROM decisions WHERE id = ?').bind(Number(id)).first();
+    const key = row ? interactionKey(row.domain, row.at) : null;
+    if (kv && key) {
+      const raw = await kv.get(key);
+      if (raw) {
+        const body = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        body.outcome = what;
+        await kv.put(key, JSON.stringify(body), { metadata: metadataFor(body) });
+      }
+    }
+
+    return { id: Number(id), outcome: what, key };
   }
 
   /** The verdict: 1 or 0, and what it should have been. */
@@ -380,5 +440,5 @@ export function createLoop(env, options = {}) {
     }
   }
 
-  return { ensure, arrive, feedback, progress, recent, detail };
+  return { ensure, arrive, outcome, feedback, progress, recent, detail };
 }

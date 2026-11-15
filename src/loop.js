@@ -268,7 +268,7 @@ export function createLoop(env, options = {}) {
    * whether that was what he wanted. His reaction is evidence, not an answer:
    * the correction is his to judge, and hers to work out.
    */
-  async function review(domain) {
+  async function review(domain, ask = null) {
     if (!db) return { text: '', count: 0 };
     let rows = [];
     try {
@@ -314,16 +314,35 @@ export function createLoop(env, options = {}) {
         const parts = [`she chose ${row.decided}`];
         const happened = describeOutcome(row);
         if (happened) parts.push(happened);
-        if (Number(row.correct) === 1) parts.push('he said that was what he wanted');
-        else if (Number(row.correct) === 0) parts.push('he said that was not what he wanted');
+        // A row he has not judged is not a rejection: Number(null) is 0.
+        if (row.correct != null && Number(row.correct) === 1) parts.push('he said that was what he wanted');
+        else if (row.correct != null && Number(row.correct) === 0) parts.push('he said that was not what he wanted');
         return `- "${asked}" → ${parts.join('; ')}`;
       });
 
+    // The identical ask, if it has come up: a pattern of one repeated is still a
+    // pattern, and it is the one she most needs to carry.
+    const same = ask ? rows.filter((row) => String(row.asked) === String(ask)) : [];
+    const carried = same.length
+      ? `${same.length === 1 ? 'Once' : same.length + ' times'} before, this exact ask: ` +
+        same
+          .slice(0, 4)
+          .map((row) => {
+            const did = describeOutcome(row);
+            const said = row.correct != null ? (Number(row.correct) === 1 ? ', which he wanted' : ', which he did not') : '';
+            return `${row.decided}${said}${did ? ' (' + did + ')' : ''}`;
+          })
+          .join('; ') +
+        '.\n\n'
+      : '';
+
     return {
       text:
+        carried +
         (seen ? `She has chosen here before: ${seen}.\n\n` : '') +
         'What happened on the asks he has reacted to, and where the run showed the result:\n' +
-        lines.join('\n'),
+        lines.join('\n') +
+        '\nDo not choose again a move he has already rejected for the same ask.',
       count: lines.length,
     };
   }
@@ -331,7 +350,7 @@ export function createLoop(env, options = {}) {
   /** Ask, then write the row. */
   async function arrive(text, { domain = null, ...askOptions } = {}) {
     // She reviews everything he has judged before she decides again.
-    const looked = await review(domain);
+    const looked = await review(domain, text);
     const decided = await ask(env, text, { ...askOptions, review: looked.text });
     const at = clock().toISOString();
     const key = interactionKey(domain, at);

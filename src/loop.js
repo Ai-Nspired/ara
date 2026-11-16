@@ -33,6 +33,13 @@ export const SCHEMA = [
   `ALTER TABLE decisions ADD COLUMN outcome TEXT`,
   `ALTER TABLE decisions ADD COLUMN idiom TEXT`,
   `ALTER TABLE decisions ADD COLUMN surface TEXT`,
+  // What the decision itself cost, and how long it took. Both arrive with the
+  // answer and were discarded, so there was nothing to compare one decider with
+  // another on. Fails harmlessly on a table that already has them.
+  `ALTER TABLE decisions ADD COLUMN model TEXT`,
+  `ALTER TABLE decisions ADD COLUMN cost REAL`,
+  `ALTER TABLE decisions ADD COLUMN ms INTEGER`,
+  `ALTER TABLE decisions ADD COLUMN confidence REAL`,
 ];
 
 
@@ -171,6 +178,7 @@ export async function ask(env, text, options = {}) {
 
   if (!env || !env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY is not bound');
 
+  const started = Date.now();
   const response = await fetchImpl(DECISIONS_URL, {
     method: 'POST',
     headers: {
@@ -214,13 +222,14 @@ export async function ask(env, text, options = {}) {
     throw error;
   }
 
+  const ms = Date.now() - started;
   const data = await response.json();
   const answer = (data && data.answers && data.answers.intent) || null;
   const route = (data && data.answers && data.answers.route) || null;
   const scope = (data && data.answers && data.answers.scope) || null;
 
   if (!answer || answer.type === 'refusal') {
-    return { move: null, route: null, refused: true, probabilities: null, confidence: null, routeConfidence: null, cost: data?.usage?.cost ?? null, model: data?.model || model };
+    return { move: null, route: null, refused: true, probabilities: null, confidence: null, routeConfidence: null, cost: data?.usage?.cost ?? null, ms, model: data?.model || model };
   }
 
   return {
@@ -233,6 +242,7 @@ export async function ask(env, text, options = {}) {
     routes: route && route.type !== 'refusal' ? route.probabilities || null : null,
     routeConfidence: route && route.type !== 'refusal' ? route.confidence ?? null : null,
     cost: data?.usage?.cost ?? null,
+    ms,
     model: data?.model || model,
   };
 }
@@ -620,8 +630,8 @@ export function createLoop(env, options = {}) {
     let id = null;
     if (db) {
       const result = await db
-        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(at, picked, String(text), decided.move, null, null, idiom.kind, surface)
+        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface, model, cost, ms, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(at, picked, String(text), decided.move, null, null, idiom.kind, surface, decided.model || null, decided.cost ?? null, decided.ms ?? 0, decided.confidence ?? null)
         .run();
       id = rowId(result);
     }
@@ -631,7 +641,7 @@ export function createLoop(env, options = {}) {
         at, domain: picked, surface, asked: text, decided: decided.move, route: decided.route,
         refused: decided.refused, confidence: decided.confidence, routeConfidence: decided.routeConfidence,
         probabilities: decided.probabilities, routes: decided.routes,
-        cost: decided.cost, model: decided.model, correct: null, id,
+        cost: decided.cost, model: decided.model, ms: decided.ms ?? null, correct: null, id,
         reviewed: looked.count, idiom: idiom.kind, consensus: looked.consensus || null,
       };
       // No expirationTtl: this is a record.

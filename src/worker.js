@@ -253,6 +253,21 @@ export default {
       return handleResolve(request, env, url.searchParams.get("stream") === "1");
     }
     if (url.pathname === "/decide" && request.method === "POST") return handleDecide(request, env);
+    // The loop's own writes and its journal are the owner's business: mind calls
+    // these every turn, so it holds the key, and nothing anonymous can write a
+    // verdict into the journal that grades her.
+    if (url.pathname === "/feedback" && request.method === "POST") {
+      const denied = adminGate(request, env);
+      if (denied) return denied;
+    }
+    if (url.pathname === "/outcome" && request.method === "POST") {
+      const denied = adminGate(request, env);
+      if (denied) return denied;
+    }
+    if (url.pathname === "/recent" && request.method === "GET") {
+      const denied = adminGate(request, env);
+      if (denied) return denied;
+    }
     if (url.pathname === "/feedback" && request.method === "POST") return handleFeedback(request, env);
     if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
     if (url.pathname === "/domains") {
@@ -260,6 +275,8 @@ export default {
         return json({ domains: await loopFor(env).domainRecords() });
       }
       if (request.method === "POST") {
+        const denied = adminGate(request, env);
+        if (denied) return denied;
         let body;
         try {
           body = await request.json();
@@ -283,6 +300,24 @@ export default {
     return new Response("ara-engine-active", { headers: { "Content-Type": "text/plain" } });
   },
 };
+
+/**
+ * The admin key, compared in constant time. A missing key is a configuration
+ * fault, not an open door: this route fails closed, because the alternative is a
+ * journal anyone can write to.
+ */
+function adminGate(request, env) {
+  const want = String((env && env.ADMIN_KEY) || "").trim();
+  if (!want) {
+    return json({ error: "admin_not_configured", message: "Set ADMIN_KEY on this Worker." }, 503);
+  }
+  const given = String(request.headers.get("x-admin-key") || "").trim();
+  let drift = given.length ^ want.length;
+  for (let i = 0; i < Math.max(given.length, want.length); i++) {
+    drift |= (given.charCodeAt(i) || 0) ^ (want.charCodeAt(i) || 0);
+  }
+  return drift === 0 ? null : json({ error: "admin_key_required", message: "Send ADMIN_KEY in x-admin-key." }, 401);
+}
 
 function handleHealth(env) {
   const start = Date.now();

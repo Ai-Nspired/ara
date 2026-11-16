@@ -63,25 +63,6 @@ export const SURFACES = {
       unclear: 'You cannot tell which of these he is after. Say so: he is asked with these as the options, and nothing is written.',
     },
   },
-  tew: {
-    // In front of the truth engine: three things, and only three. An audit of
-    // what the workspace holds, a packet assembled to file or deliver, or a
-    // question the truth store answers.
-    question: 'He has handed you this at the truth engine. Which is it: an audit of the workspace, a packet made ready to file, or something he is asking?',
-    store: 'answer',
-    labels: {
-      audit: 'An audit',
-      packet: 'A packet',
-      answer: 'Something he is asking',
-      unclear: 'I am not sure — ask me',
-    },
-    actions: {
-      audit: 'An audit — the cards in the workspace checked against the governing principles, and the audit document that comes out of it.',
-      packet: 'A packet — documents gathered in order, made ready to file or deliver.',
-      answer: 'He is asking something. The truth store answers first; only a miss is written.',
-      unclear: 'You cannot tell which of these he is after. Say so: he is asked with these as the options, and nothing runs.',
-    },
-  },
   cards: {
     question: 'He has presented this. What result is he trying to get?',
     store: 'search',

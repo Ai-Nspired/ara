@@ -4,23 +4,40 @@
   "workers_dev": true,
   "preview_urls": false,
   "compatibility_date": "2025-07-01",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
+  "compatibility_flags": ["nodejs_compat"],
   "browser": {
     "binding": "BROWSER"
   },
+  "unsafe": {
+    "bindings": [
+      {
+        "name": "CODS",
+        "type": "service",
+        "service": "cods",
+        "environment": "production"
+      },
+      {
+        "name": "MIND",
+        "type": "service",
+        "service": "mind",
+        "environment": "production"
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_id": "248766b1-d102-4e9e-a228-a19281ed5fe6"
+    }
+  ],
   "kv_namespaces": [
     {
       "binding": "KV",
       "id": "4a9bfbffb4d440cba86badc508e2045a"
-    }
-  ],
-  "d1_databases": [
+    },
     {
-      "binding": "DB",
-      "database_id": "248766b1-d102-4e9e-a228-a19281ed5fe6",
-      "database_name": "ara"
+      "binding": "MASTER_TRUTHS",
+      "id": "904eff3af4c14f06964e4f651cce9573"
     }
   ],
   "r2_buckets": [

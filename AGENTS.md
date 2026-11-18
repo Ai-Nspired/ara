@@ -19,11 +19,6 @@ package.json      wrangler as the only dependency
 
 There is no build step and no framework. `npx wrangler deploy` is the deploy.
 
-**The repo's `wrangler.jsonc` currently declares only `KV`.** A deploy from this
-repo as it stands would drop `BROWSER`, `DB`, `R2` and any secret not re-declared,
-so reconcile the config against the live bindings before deploying — never deploy a
-config that is behind the deployment.
-
 ---
 
 ## 2. Bindings
@@ -31,10 +26,16 @@ config that is behind the deployment.
 | Binding | Type | Value | Notes |
 |---|---|---|---|
 | `KV` | KV | `4a9bfbffb4d440cba86badc508e2045a` | **Memoria** — legacy memory, shared with mind's `MEM` and truth's `PROV_TRUTH` |
+| `MASTER_TRUTHS` | KV | `904eff3af4c14f06964e4f651cce9573` | master truth records, no TTL — the same namespace as mind's `MASTER` and the truth worker's `MASTER_TRUTHS` |
 | `DB` | D1 | `248766b1-d102-4e9e-a228-a19281ed5fe6` | the journal (`decisions`) |
 | `R2` | R2 | `speakeasy-files` | bulk: documents, long text, captures |
 | `BROWSER` | Browser Rendering | — | pages a Worker's `fetch` cannot reach |
+| `CODS` | service | worker `cods`, production | declared; no route reaches it yet |
+| `MIND` | service | worker `mind`, production | declared; no route reaches it yet |
 | `OPENROUTER_API_KEY` | secret | — | paid deciders only; never a `:free` slug |
+
+`wrangler.jsonc` declares every binding in this table. The secret does not live in
+it.
 
 **`AI_SEARCH` is not wanted.** It was removed deliberately. Do not add it back.
 

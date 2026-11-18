@@ -8,22 +8,18 @@
   "browser": {
     "binding": "BROWSER"
   },
-  "unsafe": {
-    "bindings": [
-      {
-        "name": "CODS",
-        "type": "service",
-        "service": "cods",
-        "environment": "production"
-      },
-      {
-        "name": "MIND",
-        "type": "service",
-        "service": "mind",
-        "environment": "production"
-      }
-    ]
-  },
+  "services": [
+    {
+      "binding": "CODS",
+      "service": "cods",
+      "environment": "production"
+    },
+    {
+      "binding": "MIND",
+      "service": "mind",
+      "environment": "production"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

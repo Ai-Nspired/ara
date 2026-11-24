@@ -468,15 +468,75 @@ export function implicitIntent({ idiom, looked, held } = {}) {
 }
 
 // Her reading as the decider returned it, refusals and unclarity included, so a
-// reading that ended in "I cannot tell" is not lost. No confidence in here: it
-// is its own column, measured beside decision confidence rather than inside it.
+// reading that ended in "I cannot tell" is not lost. What the decider said about
+// its own confidence is kept here too, as a claim and nothing more: the measured
+// number lives in the confidence columns, read from the record.
 export function interpretedIntent(decided) {
   return JSON.stringify({
     move: decided && decided.move != null ? decided.move : null,
     scope: decided && decided.scope != null ? decided.scope : null,
     refusal: Boolean(decided && decided.refused),
     unclear: Boolean(decided && decided.move === 'unclear'),
+    // What the decider said about itself, kept as a claim and never as a
+    // confidence: a model's self-report is not a measurement of the operator.
+    claimed: decided && decided.confidence != null ? decided.confidence : null,
   });
+}
+
+/**
+ * Confidence is the relationship with the operator, read from the record.
+ *
+ * Explicit signals are his verdicts on asks of this shape: `right` and `wrong`.
+ * Implicit signals are the pattern itself: how many asks of this shape there
+ * are, and how many of them he has actually judged. Agreement is consensus with
+ * her reading; coverage is how much of the pattern has been verified. Their
+ * product is what rises as a preference repeats and holds — never a number the
+ * decider asserted about itself.
+ *
+ * No pattern, or nothing judged, gives `null`: the relationship is unmeasured,
+ * which is not the same as measured and wrong. The band is reported beside the
+ * number so nobody reads a float as truth. Nothing here gates behaviour yet.
+ */
+export const PREDICT_AT = 0.3;
+export const SYNERGY_AT = 0.65;
+
+export function confidenceFrom({ looked, move = null, domain = null, origin = null } = {}) {
+  const shape = (looked && looked.shape) || {};
+  const slot = move ? shape[move] || null : null;
+  const right = Number((slot && slot.right) || 0);
+  const wrong = Number((slot && slot.wrong) || 0);
+  const judged = right + wrong;
+  const asks = Math.max(Number((looked && looked.shapeSeen) || 0), judged);
+  const agree = judged ? Number((right / judged).toFixed(4)) : null;
+  const cover = asks ? Number((judged / asks).toFixed(4)) : null;
+  const value = agree == null || cover == null ? null : Number((agree * cover).toFixed(4));
+
+  // The domain's own record: how often her choices in it were what he wanted.
+  const tally = (looked && looked.domain) || {};
+  const domainRight = Number(tally.ok || 0);
+  const domainWrong = Number(tally.bad || 0);
+  const sameDomain = Boolean(domain && tally.name && domain === tally.name);
+  const domainValue = sameDomain && domainRight + domainWrong
+    ? Number((domainRight / (domainRight + domainWrong)).toFixed(4))
+    : null;
+
+  return {
+    confidence: value,
+    band: value == null ? 'unmeasured' : value >= SYNERGY_AT ? 'synergy' : value >= PREDICT_AT ? 'predict' : 'low',
+    intent_confidence: value,
+    domain_confidence: domainValue,
+    evidence_confidence: cover,
+    basis: {
+      move: move || null,
+      shape: (looked && looked.consensus && looked.consensus.shape) || null,
+      asks,
+      right,
+      wrong,
+      stored: Number((slot && slot.stored) || 0),
+    },
+    domain_basis: { domain: domain || null, origin: origin || null, reviewed: tally.name || null, right: domainRight, wrong: domainWrong },
+    evidence_basis: { judged, asks },
+  };
 }
 
 // What surrounded the ask, so the record can be read later without guessing.
@@ -604,14 +664,23 @@ export function createLoop(env, options = {}) {
     // Domain-specific principles: what has held in the domain the ask belongs to.
     // The domain is his list; if the ask is not in one of them, it is general.
     let domainLine = '';
+    // The domain's own record, kept rather than only spoken: it is what domain
+    // confidence is read from, and it is fetched once for both uses.
+    const domainTally = { name: null, ok: 0, bad: 0, n: 0 };
     const assumed = choices && choices.length ? (choices.includes(domain) ? domain : choices.includes('general') ? 'general' : choices[0]) : null;
     if (assumed) {
+      domainTally.name = assumed;
       try {
         const statement = db.prepare(
           'SELECT decided, SUM(correct = 1) AS ok, SUM(correct = 0) AS bad, COUNT(*) AS n FROM decisions WHERE domain = ? AND decided IS NOT NULL GROUP BY decided ORDER BY n DESC',
         ).bind(assumed);
         const out = await statement.all();
         const inDomain = out?.results || out || [];
+        for (const row of inDomain) {
+          domainTally.ok += Number(row.ok || 0);
+          domainTally.bad += Number(row.bad || 0);
+          domainTally.n += Number(row.n || 0);
+        }
         if (inDomain.length) {
           domainLine =
             `In ${assumed}, what has held: ` +
@@ -636,7 +705,9 @@ export function createLoop(env, options = {}) {
       .join(', ');
 
     if (!rows.length) {
-      return { text: seen ? `She has chosen here before: ${seen}.` : '', count: 0 };
+      // Nothing judged yet: the shape is known and the relationship is not, so
+      // the caller gets the counts it needs to say "unmeasured" rather than 0.
+      return { text: seen ? `She has chosen here before: ${seen}.` : '', count: 0, shape: per, shapeSeen: shapeRows.length, domain: domainTally, consensus: null, repeating: 0 };
     }
 
     const lines = rows
@@ -689,6 +760,11 @@ export function createLoop(env, options = {}) {
       count: lines.length + shapeRows.length,
       consensus: lead,
       repeating: same.length,
+      // The tallies the prose was written from, so confidence can be read from
+      // the record instead of from the reading's own opinion of itself.
+      shape: per,
+      shapeSeen: shapeRows.length,
+      domain: domainTally,
     };
   }
 
@@ -749,6 +825,9 @@ export function createLoop(env, options = {}) {
         // she read goes out beside it.
         refused: false,
         notes: looked.text || null,
+        // Nothing was decided here, so nothing is measured: `null`, not 0.
+        confidence: null,
+        band: 'unmeasured',
         // One line, because a client that shows one line cannot show both the
         // finding and a question about it, and the question was repeating the
         // finding back.
@@ -788,12 +867,14 @@ export function createLoop(env, options = {}) {
     const intentRead = implicitIntent({ idiom, looked, held });
     const intentTaken = interpretedIntent(decided);
     const intentAround = contextFor({ surface, domain, held, card: askOptions.forced || null, repeating: looked.repeating });
+    // Read from the record, not from the decider's opinion of itself.
+    const measured = confidenceFrom({ looked, move: decided.move, domain: picked, origin });
 
     let id = null;
     if (db) {
       const result = await db
-        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface, model, cost, ms, confidence, intent_explicit, intent_implicit, intent_interpreted, context, domains) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(at, picked, String(text), decided.move, null, null, idiom.kind, surface, decided.model || null, decided.cost ?? null, decided.ms ?? 0, decided.confidence ?? null, intentWritten, intentRead, intentTaken, intentAround, domainSet(picked, origin, decided.scope || null))
+        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface, model, cost, ms, confidence, intent_explicit, intent_implicit, intent_interpreted, context, domains, intent_confidence, domain_confidence, evidence_confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(at, picked, String(text), decided.move, null, null, idiom.kind, surface, decided.model || null, decided.cost ?? null, decided.ms ?? 0, measured.confidence, intentWritten, intentRead, intentTaken, intentAround, domainSet(picked, origin, decided.scope || null), measured.intent_confidence, measured.domain_confidence, measured.evidence_confidence)
         .run();
       id = rowId(result);
     }
@@ -801,7 +882,8 @@ export function createLoop(env, options = {}) {
     if (kv) {
       const body = {
         at, domain: picked, surface, asked: text, decided: decided.move, route: decided.route,
-        refused: decided.refused, confidence: decided.confidence, routeConfidence: decided.routeConfidence,
+        refused: decided.refused, confidence: measured.confidence, band: measured.band,
+        confidence_basis: measured.basis, routeConfidence: decided.routeConfidence,
         probabilities: decided.probabilities, routes: decided.routes,
         cost: decided.cost, model: decided.model, ms: decided.ms ?? null, correct: null, id,
         reviewed: looked.count, idiom: idiom.kind, consensus: looked.consensus || null,
@@ -824,6 +906,9 @@ export function createLoop(env, options = {}) {
         id, key, at, domain: picked, surface,
         move: decided.move || null,
         refused: Boolean(decided.refused),
+        confidence: measured.confidence,
+        band: measured.band,
+        confidence_basis: measured.basis,
         notes: looked.text || null,
         ...cardFor(noted, [
           { value: 'use', label: 'Use that stored answer as it stands' },
@@ -853,6 +938,9 @@ export function createLoop(env, options = {}) {
         // out with it: a "no" that cost something says what it cost.
         cost: decided.cost ?? null,
         route: decided.route ?? null,
+        confidence: measured.confidence,
+        band: measured.band,
+        confidence_basis: measured.basis,
         notes: looked.text || null,
         // Her own "I am not sure" is not one of his options.
         ...cardFor(face.question, surfaceOptions(face, { drop: ['unclear'] }), { clarify: true }),
@@ -866,6 +954,10 @@ export function createLoop(env, options = {}) {
     return {
       id, key, at,
       move: decided.move, domain: picked, surface, route: decided.route, refused: Boolean(decided.refused), cost: decided.cost,
+      // Measured from the record, with the counts that produced it.
+      confidence: measured.confidence,
+      band: measured.band,
+      confidence_basis: measured.basis,
       reviewed: looked.count,
       idiom: idiom.kind,
       consensus: looked.consensus || null,

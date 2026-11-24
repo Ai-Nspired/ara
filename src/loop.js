@@ -8,7 +8,10 @@
  * history reads without fetching bodies. No put passes expirationTtl.
  */
 
-export const DECISIONS_URL = 'https://openrouter.ai/api/alpha/decisions';
+// The deciders are reached through orproxy, which holds the OpenRouter key and
+// forwards this endpoint's body and answer shape unchanged. She calls the
+// provider directly nowhere, so `ara` binds no provider key of its own.
+export const DECISIONS_URL = 'https://orproxy.ai-n.workers.dev/api/decide';
 
 // Paid deciders. One question bills flash; two or more answer jointly so the
 // state is charged once. No `:free` slugs here.
@@ -228,7 +231,7 @@ const rowId = (result) => {
  * One decisions pass. Returns the move, the distribution, and what it cost.
  * A refusal is not an answer: it comes back as `refused`, never as `none`.
  */
-export async function ask(env, text, options = {}) {
+export async function ask(text, options = {}) {
   if (!text) throw new Error('ask needs what was asked');
   const fetchImpl = options.fetchImpl || fetch;
   const routes = options.routes || ROUTES;
@@ -236,15 +239,12 @@ export async function ask(env, text, options = {}) {
   const asked = options.moves || (surface ? surface.actions : MOVES);
   // Two questions are answered jointly, so the state is billed once.
   const model = options.model || JOINT_DECIDER;
-  const moves = options.moves || MOVES;
-
-  if (!env || !env.OPENROUTER_API_KEY) throw new Error('OPENROUTER_API_KEY is not bound');
 
   const started = Date.now();
   const response = await fetchImpl(DECISIONS_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+      // orproxy adds the upstream credential; nothing here is a secret.
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -766,7 +766,7 @@ export function createLoop(env, options = {}) {
         ? { move: 'unclear', scope: null, route: null, refused: false, cost: 0, model: 'the-stored-pair' }
         : isKey
           ? { move: 'result', scope: null, route: null, refused: false, cost: 0, model: 'the-key' }
-        : await ask(env, text, { ...askOptions, review: seen, domains: choices });
+        : await ask(text, { ...askOptions, review: seen, domains: choices });
     // Her identification wins when it is a domain he has put in the list.
     const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
     const at = clock().toISOString();

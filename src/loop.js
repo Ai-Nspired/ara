@@ -724,32 +724,38 @@ export function createLoop(env, options = {}) {
       // No decider runs here, so the domain is the one he named or the default.
       const pickedNow = choices.includes(domain) ? domain : choices[0];
       const at2 = clock().toISOString();
-      const key2 = interactionKey(domain, at2);
+      const key2 = interactionKey(pickedNow, at2);
+      // The same contract as the main path, because this is a record of the ask
+      // too, even though no decider ran. "She could not tell" is the reading
+      // here, and it is written as a reading rather than left absent. Nothing
+      // below is an authorization: a clause is only what the ask looked like.
+      const intentWritten = explicitIntent(text, { card: null, domain });
+      const intentRead = implicitIntent({ idiom, looked, held: null });
+      const intentTaken = interpretedIntent({ move: 'unclear', scope: null, refused: false });
+      const intentAround = contextFor({ surface, domain, held: null, card: null, repeating: looked.repeating });
       let id2 = null;
       if (db) {
         const result = await db
-          .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .bind(at2, pickedNow, String(text), 'unclear', null, null, idiom.kind, surface)
+          .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface, intent_explicit, intent_implicit, intent_interpreted, context, domains) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+          .bind(at2, pickedNow, String(text), 'unclear', null, null, idiom.kind, surface, intentWritten, intentRead, intentTaken, intentAround, domainSet(pickedNow, choices.includes(domain) ? 'named' : 'default'))
           .run();
         id2 = rowId(result);
       }
+      const said = `"${clip(text, 60)}" is a key, and there is no stored pair for it.`;
       return {
         id: id2, key: key2, at: at2, domain: pickedNow, surface,
         move: 'unclear',
-        text: `"${clip(String(text), 60)}" is a key, and there is no stored pair for it.`,
-        clarify: {
-          text: `"${clip(String(text), 60)}" is a key, and there is no stored pair for it.`,
-          questions: [
-            {
-              id: 'want',
-              q: 'There is nothing stored under that key. What should happen?',
-              options: [
-                { value: 'write', label: 'Write a new answer for that key' },
-                { value: 'none', label: 'Leave it — no pair for now' },
-              ],
-            },
-          ],
-        },
+        // Same contract as every other path: she refused nothing here, and what
+        // she read goes out beside it.
+        refused: false,
+        notes: looked.text || null,
+        // One line, because a client that shows one line cannot show both the
+        // finding and a question about it, and the question was repeating the
+        // finding back.
+        ...cardFor(said, [
+          { value: 'write', label: 'Write a new answer for that key' },
+          { value: 'none', label: 'Leave it — no pair for now' },
+        ], { clarify: true }),
       };
     }
 
@@ -764,13 +770,30 @@ export function createLoop(env, options = {}) {
     // Her identification wins when it is a domain he has put in the list.
     const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
     const at = clock().toISOString();
-    const key = interactionKey(domain, at);
+    // Which of the three the primary is. It mirrors `picked` exactly, including
+    // the case where her scope won over a domain he also named: then the row
+    // says `decided`, because `decided` is what the column holds.
+    const origin = decided.scope && choices.includes(decided.scope)
+      ? (decided.scope === domain ? 'named' : 'decided')
+      : choices.includes(domain) ? 'named' : 'default';
+    // The row records `picked`; the body is written where the row says it is.
+    // One identity, computed once, so `outcome` and `feedback` — which derive
+    // their key from this same column — cannot disagree with the writer.
+    const key = interactionKey(picked, at);
+
+    // What was intended, kept as evidence about the ask rather than as a fact
+    // about him. Nothing written here authorizes anything: authorization is
+    // evaluated elsewhere, and a clause is only what the ask looked like.
+    const intentWritten = explicitIntent(text, { card: askOptions.forced || null, domain });
+    const intentRead = implicitIntent({ idiom, looked, held });
+    const intentTaken = interpretedIntent(decided);
+    const intentAround = contextFor({ surface, domain, held, card: askOptions.forced || null, repeating: looked.repeating });
 
     let id = null;
     if (db) {
       const result = await db
-        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface, model, cost, ms, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-        .bind(at, picked, String(text), decided.move, null, null, idiom.kind, surface, decided.model || null, decided.cost ?? null, decided.ms ?? 0, decided.confidence ?? null)
+        .prepare('INSERT INTO decisions (at, domain, asked, decided, correct, corrected_to, idiom, surface, model, cost, ms, confidence, intent_explicit, intent_implicit, intent_interpreted, context, domains) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(at, picked, String(text), decided.move, null, null, idiom.kind, surface, decided.model || null, decided.cost ?? null, decided.ms ?? 0, decided.confidence ?? null, intentWritten, intentRead, intentTaken, intentAround, domainSet(picked, origin, decided.scope || null))
         .run();
       id = rowId(result);
     }
@@ -795,28 +818,24 @@ export function createLoop(env, options = {}) {
 
     // A stored pair that comes back as a question is not the result: there is a
     // call to make, and it is his.
-    const notAnAnswer = pairSettles;
-    if (notAnAnswer) {
+    if (pairSettles) {
+      const noted = `The store holds this for "${clip(text, 80)}", and it asks you back instead of answering:`;
       return {
         id, key, at, domain: picked, surface,
         move: decided.move || null,
-        text: `The store holds this for "${clip(String(text), 80)}", and it asks you back instead of answering:\n\n"${clip(String(held.answer), 240)}"`,
-        question: `The store holds this for "${clip(String(text), 80)}", and it asks you back instead of answering:`,
-        answer: clip(String(held.answer), 240),
-        clarify: {
-          text: `The store holds this for "${clip(String(text), 80)}", and it asks you back instead of answering:\n\n"${clip(String(held.answer), 240)}"`,
-          questions: [
-            {
-              id: 'want',
-              q: 'What should happen with it?',
-              options: [
-                { value: 'use', label: 'Use that stored answer as it stands' },
-                { value: 'pair', label: 'Show me the stored pair behind it' },
-                { value: 'write', label: 'Write a new answer now' },
-              ],
-            },
-          ],
-        },
+        refused: Boolean(decided.refused),
+        notes: looked.text || null,
+        ...cardFor(noted, [
+          { value: 'use', label: 'Use that stored answer as it stands' },
+          { value: 'pair', label: 'Show me the stored pair behind it' },
+          { value: 'write', label: 'Write a new answer now' },
+        ], {
+          // The card asks; what it is asking about rides beside the question, so
+          // a one-line reader still shows him the reason he is being asked.
+          text: `${noted}\n\n"${clip(held.answer, 240)}"`,
+          clarify: true,
+        }),
+        answer: clip(held.answer, 240),
       };
     }
 
@@ -826,33 +845,34 @@ export function createLoop(env, options = {}) {
       return {
         id, key, at, domain: picked, surface,
         move: decided.move || null,
-        question: face.question,
-        clarify: {
-          questions: [
-            {
-              id: 'want',
-              q: face.question,
-              // Her own "I am not sure" is not one of his options.
-              options: Object.entries(face.labels)
-                .filter(([value]) => value !== 'unclear')
-                .map(([value, label]) => ({ value, label })),
-            },
-          ],
-        },
+        // Every path says the same thing about whether he refused and what she
+        // read, so a caller never has to test for a key that another path
+        // always sets. `undefined` on the two paths that ask him is not "no".
+        refused: Boolean(decided.refused),
+        // A refusal is billed like any other pass, so the spend and the route go
+        // out with it: a "no" that cost something says what it cost.
+        cost: decided.cost ?? null,
+        route: decided.route ?? null,
+        notes: looked.text || null,
+        // Her own "I am not sure" is not one of his options.
+        ...cardFor(face.question, surfaceOptions(face, { drop: ['unclear'] }), { clarify: true }),
       };
     }
 
+    // A surface with no menu gets no card, and no invented one: `null` says she
+    // has nothing to ask, rather than handing out a guess at what he meant.
+    const menu = face ? surfaceOptions(face) : null;
+
     return {
-      id, key, at, domain,
-      move: decided.move, domain: picked, surface, route: decided.route, refused: decided.refused, cost: decided.cost,
+      id, key, at,
+      move: decided.move, domain: picked, surface, route: decided.route, refused: Boolean(decided.refused), cost: decided.cost,
       reviewed: looked.count,
       idiom: idiom.kind,
       consensus: looked.consensus || null,
       // Her record goes out with the decision: the model that writes the answer
       // reads the same notes she decided from.
       notes: looked.text || null,
-      question: face ? face.question : null,
-      options: face && face.labels ? Object.values(face.labels) : null,
+      ...(menu ? cardFor(face.question, menu) : { card: null, question: null, text: null, options: null }),
     };
   }
 

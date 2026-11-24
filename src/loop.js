@@ -40,6 +40,20 @@ export const SCHEMA = [
   `ALTER TABLE decisions ADD COLUMN cost REAL`,
   `ALTER TABLE decisions ADD COLUMN ms INTEGER`,
   `ALTER TABLE decisions ADD COLUMN confidence REAL`,
+  // What was intended, as distinct from what was decided. Explicit, implicit,
+  // interpreted and confirmed stay in separate columns so an inference can
+  // never quietly become a confirmed fact; `confidence` above stays the
+  // decision's confidence, and these are the dimensions it must not absorb.
+  // Preference confidence is not here: it accumulates per domain in Memoria.
+  `ALTER TABLE decisions ADD COLUMN intent_explicit TEXT`,
+  `ALTER TABLE decisions ADD COLUMN intent_implicit TEXT`,
+  `ALTER TABLE decisions ADD COLUMN intent_interpreted TEXT`,
+  `ALTER TABLE decisions ADD COLUMN intent_confirmed TEXT`,
+  `ALTER TABLE decisions ADD COLUMN context TEXT`,
+  `ALTER TABLE decisions ADD COLUMN domains TEXT`,
+  `ALTER TABLE decisions ADD COLUMN intent_confidence REAL`,
+  `ALTER TABLE decisions ADD COLUMN domain_confidence REAL`,
+  `ALTER TABLE decisions ADD COLUMN evidence_confidence REAL`,
 ];
 
 

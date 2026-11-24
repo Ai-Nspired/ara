@@ -8,7 +8,7 @@
 // Endpoints:
 //   POST /resolve            → JSON: { response, trail, resolved_by, cached }
 //   POST /resolve?stream=1  → SSE stream
-//   GET  /health            → { status, kv, latencyMs }
+//   GET  /health            → { status, kv, pulse, latencyMs }
 
 import { createLoop, idiomOf } from './loop.js';
 
@@ -329,9 +329,24 @@ function adminGate(request, env) {
   return drift === 0 ? null : json({ error: "admin_key_required", message: "Send ADMIN_KEY in x-admin-key." }, 401);
 }
 
-function handleHealth(env) {
+// What Pulse says about itself, asked through the service binding. A binding is
+// not a conversation until something crosses it: this is ARA's side of the
+// link, and it fails soft — the dock being down is not her being down.
+async function pulseStatus(env) {
+  if (!env || !env.PULSE || typeof env.PULSE.fetch !== "function") return "unbound";
+  try {
+    const response = await env.PULSE.fetch("https://ambient/health", { signal: AbortSignal.timeout(1500) });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) return "status_" + response.status;
+    return (body && (body.worker || body.status)) || "ok";
+  } catch {
+    return "unreachable";
+  }
+}
+
+async function handleHealth(env) {
   const start = Date.now();
-  const status = { status: "ok", kv: !!env.KV, latencyMs: Date.now() - start };
+  const status = { status: "ok", kv: !!env.KV, pulse: await pulseStatus(env), latencyMs: Date.now() - start };
   return new Response(JSON.stringify(status), { headers: { "Content-Type": "application/json", ...corsHeaders } });
 }
 

@@ -23,6 +23,16 @@ function loopFor(env) {
   return instance;
 }
 
+// Starting the schema check is not finishing it. A write that lands while it is
+// still running meets the table that predates the columns it names — which is
+// how a cold isolate answered `no column named domains` while the ALTERs were
+// still in flight. Anything that writes the journal waits for that one check.
+async function readyLoop(env) {
+  const instance = loopFor(env);
+  if (schemaReady) await schemaReady;
+  return instance;
+}
+
 const CONFIDENCE_THRESHOLD = 0.55;
 
 const corsHeaders = {
@@ -350,7 +360,8 @@ async function handleDecide(request, env) {
   const text = body.text || body.prompt || "";
   if (!text) return json({ error: "text_required" }, 400);
   try {
-    const result = await loopFor(env).arrive(text, {
+    const loop = await readyLoop(env);
+    const result = await loop.arrive(text, {
       domain: body.domain || null,
       surface: body.surface || body.domain || null,
       // His tap on the card she wrote comes back as the decision.

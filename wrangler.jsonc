@@ -4,7 +4,12 @@
   "workers_dev": true,
   "preview_urls": false,
   "compatibility_date": "2025-07-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public: ARA reaches orproxy on the same
+  // workers.dev zone, and without this flag the edge refuses that subrequest
+  // with error 1042 before it leaves Cloudflare. The flag makes global fetch
+  // resolve every hostname the way an outside client would, which is what a
+  // call to the proxy actually needs.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "browser": {
     "binding": "BROWSER"
   },
@@ -17,6 +22,13 @@
     {
       "binding": "MIND",
       "service": "mind",
+      "environment": "production"
+    },
+    {
+      // Pulse, while the Worker is still named ambient. Binding first so the
+      // rename does not have to touch this line again.
+      "binding": "PULSE",
+      "service": "ambient",
       "environment": "production"
     }
   ],

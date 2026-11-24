@@ -116,6 +116,37 @@ export const SURFACES = {
       none: 'None of these results.',
     },
   },
+  ambient: {
+    // Pulse: the dock dropped into a page he is already reading. `ambient` is
+    // its name today — the Worker, and the `surface` value it sends. `PULSE` is
+    // the binding, named for the rename that is coming.
+    //
+    // Until that rename lands the key stays `ambient`, because that is what the
+    // dock puts on the wire and what its rows already say. When the Worker
+    // becomes `pulse`, accept both labels and have `review()` look for both:
+    // otherwise every row written as `ambient` drops out of Pulse's own history,
+    // and that history is the record confidence is read from.
+    //
+    // It answers in place and draws a card when the answer is a card; it has no
+    // table of its own, so `none` is not one of the moves — the answer is the
+    // move.
+    question: 'He is in the dock, on a page he is reading. What is he asking for?',
+    store: null,
+    labels: {
+      answer: 'An answer in the dock',
+      search: 'An answer from the web',
+      fetch: 'This page, read',
+      card: 'A card from this page',
+      unclear: 'I am not sure — ask me',
+    },
+    actions: {
+      answer: 'An answer written in the dock from what she already knows or can reason out. No card, no search.',
+      search: 'An answer that has to come from the web, searched now.',
+      fetch: 'The page he is looking at, read and reported on: its contents are the answer.',
+      card: 'A card drawn into the dock from what he is looking at or attached.',
+      unclear: 'You cannot tell which of these he is after. Say so: he is asked with these as the options, and nothing is written.',
+    },
+  },
 };
 
 /** The menu: a definition per option, with `none` as a real catch-all. */

@@ -150,6 +150,54 @@ const clip = (value, n) => {
 
 export const interactionKey = (domain, at) => `${KEY}${domain || 'none'}:${at}`;
 
+/**
+ * The domain set of one ask, as the row records it. `origin` is the part
+ * `general` alone cannot say: whether the primary came from him, from her, or
+ * from the default when neither named one. `candidate` keeps what the decider
+ * proposed even when it was not adopted, so a rejected classification is
+ * recorded rather than dropped.
+ */
+export const domainSet = (primary, origin, candidate = null) => JSON.stringify({
+  primary,
+  origin,
+  candidate: candidate || null,
+  set: [primary],
+});
+
+/**
+ * One card, projected from one list.
+ *
+ * `card.options` carries `{ value, label }`, so a client that returns a click
+ * can send the value and not the sentence in front of it. `options` beside it is
+ * the labels alone, for a reader that only knows how to render strings;
+ * `question` and `text` are the same line it already looks for. Every one of
+ * those fields is derived here, which is the point: a card whose menu lives in
+ * two places is a card whose menu will disagree with itself. `[object Object]`
+ * was that disagreement showing through — one path handed out objects and the
+ * other handed out strings, and the client that guessed strings stringified
+ * objects.
+ *
+ * `clarify` is only present when the card is actually asking him something, so
+ * its presence keeps meaning "this needs an answer".
+ */
+export const cardFor = (question, options = [], { text = question, clarify = false } = {}) => {
+  const list = options.map(({ value, label }) => ({ value, label }));
+  const shape = {
+    card: { question, text, options: list },
+    question,
+    text,
+    options: list.map((option) => option.label),
+  };
+  if (clarify) shape.clarify = { text, questions: [{ id: 'want', q: question, options: list }] };
+  return shape;
+};
+
+/** A surface's menu as value+label pairs. `drop` removes her own "not sure". */
+export const surfaceOptions = (face, { drop = [] } = {}) =>
+  Object.entries((face && face.labels) || {})
+    .filter(([value]) => !drop.includes(value))
+    .map(([value, label]) => ({ value, label }));
+
 /** Small enough that KV will take it, and it shrinks rather than throwing. */
 export function metadataFor(entry) {
   const build = (chars, withResult) => {
@@ -366,6 +414,82 @@ export function idiomOf(text) {
 const IDIOM_RULE =
   'If he states the result he wants, that is the answer. If asks of this shape have got one result before, that is the result here. If it is new and not clear, choose none.';
 
+// What he actually said, clause by clause. Descriptive only: nothing here
+// grants anything. A question is a communication whose objective may remain
+// unresolved; a statement is not permission; an imperative is a shape, not an
+// authorization to execute. VERBS and idiomOf() are signals, never proof of
+// intent. Every clause is kept verbatim, including the ones that classify as
+// nothing at all.
+const OBJECTIVE = /\b(should be|i want|i need|the goal is|goal:|the answer is|result should)\b/i;
+
+export function explicitIntent(text, options = {}) {
+  const raw = String(text == null ? '' : text);
+  const found = raw.match(/[^.?!;\n]+[.?!;]?/g) || (raw.trim() ? [raw.trim()] : []);
+  const clauses = found.map((clause, index) => {
+    const shown = clause.replace(/^\s+|\s+$/g, '');
+    const low = shown.toLowerCase();
+    const first = low.split(/\s+/)[0].replace(/[^a-z]/g, '');
+    let kind = 'unclassified';
+    if (/[a-z0-9]/i.test(shown)) {
+      const shape = idiomOf(shown).kind;
+      if (/\?$/.test(shown) || /^(what|why|how|when|where|who|which|is|are|was|were|does|do|did|can|could|should|would|will)\b/.test(low)) kind = 'question';
+      else if (OBJECTIVE.test(low)) kind = 'objective';
+      else if (VERBS.has(first)) kind = 'instruction';
+      else if (shape === 'code' || shape === 'reference') kind = 'lookup';
+      else kind = 'statement';
+    }
+    return { clause: index, kind, text: shown };
+  });
+  const supplied = [];
+  if (options.card) supplied.push({ source: 'card', value: String(options.card) });
+  if (options.domain) supplied.push({ source: 'domain', value: String(options.domain) });
+  return JSON.stringify({ authority: 'not_evaluated', clauses, supplied });
+}
+
+// Candidates, each with the basis it came out of. A candidate is not a fact, and
+// one that contradicts the explicit layer is kept rather than dropped.
+export function implicitIntent({ idiom, looked, held } = {}) {
+  const candidates = [];
+  if (idiom) candidates.push({ reading: `the ask is ${idiom.name}`, basis: `shape of the ask (${idiom.kind})`, weight: null });
+  const lead = looked && looked.consensus;
+  if (lead && lead.move) {
+    const right = Number(lead.right || 0);
+    const wrong = Number(lead.wrong || 0);
+    candidates.push({
+      reading: `he will want ${lead.move}`,
+      basis: `${Number(lead.n || 0)} asks of this shape before; he wanted it ${right}, did not ${wrong}`,
+      weight: right + wrong ? Number((right / (right + wrong)).toFixed(4)) : null,
+    });
+  }
+  if (held) {
+    candidates.push({ reading: 'the stored pair is the result he wants', basis: `the store holds an answer at layer ${held.layer}`, weight: null });
+  }
+  return JSON.stringify(candidates);
+}
+
+// Her reading as the decider returned it, refusals and unclarity included, so a
+// reading that ended in "I cannot tell" is not lost. No confidence in here: it
+// is its own column, measured beside decision confidence rather than inside it.
+export function interpretedIntent(decided) {
+  return JSON.stringify({
+    move: decided && decided.move != null ? decided.move : null,
+    scope: decided && decided.scope != null ? decided.scope : null,
+    refusal: Boolean(decided && decided.refused),
+    unclear: Boolean(decided && decided.move === 'unclear'),
+  });
+}
+
+// What surrounded the ask, so the record can be read later without guessing.
+export function contextFor({ surface, domain, held, card, repeating } = {}) {
+  return JSON.stringify({
+    surface: surface || null,
+    domain_named: domain || null,
+    stored_pair: Boolean(held),
+    card: card || null,
+    repeating: Number(repeating || 0),
+  });
+}
+
 // The domains are a list she keeps, not a taxonomy this file invents: every
 // domain is a KV key under `domain:`, carrying its own metadata — when it was
 // first seen, how often, and what she has chosen in it. Nothing here names a
@@ -564,6 +688,7 @@ export function createLoop(env, options = {}) {
         '\nDo not choose again a move he has already rejected for the same ask.',
       count: lines.length + shapeRows.length,
       consensus: lead,
+      repeating: same.length,
     };
   }
 

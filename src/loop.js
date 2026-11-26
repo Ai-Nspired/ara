@@ -271,6 +271,16 @@ export async function ask(text, options = {}) {
   // Two questions are answered jointly, so the state is billed once.
   const model = options.model || JOINT_DECIDER;
 
+  // Images ride inside the state, exactly where the decider reads them. A caller
+  // that sends none gets the string it always got, so nothing else changes.
+  const images = (Array.isArray(options.images) ? options.images : [])
+    .filter((url) => typeof url === 'string' && /^data:image\//.test(url))
+    .slice(0, 8);
+  const written = options.review ? String(text) + '\n\n' + options.review : String(text);
+  const state = images.length
+    ? [written, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))]
+    : written;
+
   const started = Date.now();
   const response = await fetchImpl(DECISIONS_URL, {
     method: 'POST',
@@ -280,7 +290,7 @@ export async function ask(text, options = {}) {
     },
     body: JSON.stringify({
       model,
-      state: options.review ? String(text) + '\n\n' + options.review : String(text),
+      state,
       questions: {
         intent: {
           type: 'choice',

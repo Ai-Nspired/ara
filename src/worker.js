@@ -383,6 +383,12 @@ async function handleDecide(request, env) {
       forced: body.choice || null,
       // What is already stored, read before she decides, never generated for.
       stored: body.stored || null,
+      // The picture, when the surface has one: read in the same pass as the text.
+      images: Array.isArray(body.images)
+        ? body.images
+        : body.context && Array.isArray(body.context.images)
+          ? body.context.images
+          : [],
     });
     return json(result);
   } catch (error) {

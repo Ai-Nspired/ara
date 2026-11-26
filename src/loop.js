@@ -147,6 +147,26 @@ export const SURFACES = {
       unclear: 'You cannot tell which of these he is after. Say so: he is asked with these as the options, and nothing is written.',
     },
   },
+  pulse: {
+    // The dial. Pulse is the interface: it says what it has and does what she decides.
+    // The decision is here, and the rows stay on his side. `recordings` is a projection
+    // of what is already logged on the station he is holding, not a description of it,
+    // so nothing is written and no prose is spent on it.
+    question: 'He is speaking to the dial. What does he want done?',
+    store: null,
+    labels: {
+      recordings: 'What he has recorded, shown',
+      answer: 'Something said back to him',
+      ask: 'He has to say more',
+      unclear: 'I am not sure — ask me',
+    },
+    actions: {
+      recordings: 'Show what is already recorded on his station: the clips that exist, with their station, the time each was made and how long it ran. Nothing is summarised and nothing new is written.',
+      answer: 'Something said back to him in place, from what she already knows or can work out. No card is drawn for this.',
+      ask: 'The ask is too thin to act on: he is asked a question and nothing happens until he answers.',
+      unclear: 'You cannot tell which of these he is after. Say so, with these as the options, and nothing is written.',
+    },
+  },
 };
 
 /** The menu: a definition per option, with `none` as a real catch-all. */

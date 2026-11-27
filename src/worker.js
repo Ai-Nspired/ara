@@ -306,8 +306,11 @@ export default {
     if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
     // The loop's own door: a concept he just explained arrives with the domain it
     // belongs to, its definition, what makes an answer competent in it, and what it
-    // relates to. No admin key: this is what he says, not an operator action.
+    // relates to. The loop key, not the admin key: this is what he says, written by
+    // the surfaces that heard him, and refused to anyone who is neither.
     if (url.pathname === "/domains/learn" && request.method === "POST") {
+      const denied = loopGate(request, env);
+      if (denied) return denied;
       let body;
       try {
         body = await request.json();
@@ -373,6 +376,22 @@ export default {
  * fault, not an open door: this route fails closed, because the alternative is a
  * journal anyone can write to.
  */
+/* The registry is the loop's memory, so the loop is who writes it. A surface reaches
+ * this over its service binding carrying the loop key; the owner's own key still opens
+ * it. An anonymous POST is refused, which is what the open route allowed. */
+function loopGate(request, env) {
+  const want = String((env && env.LOOP_KEY) || "").trim();
+  if (!want) return json({ error: "loop_not_configured", message: "Set LOOP_KEY on this Worker." }, 503);
+  const given = String(request.headers.get("x-loop-key") || "").trim();
+  let drift = given.length ^ want.length;
+  for (let i = 0; i < Math.max(given.length, want.length); i++) {
+    drift |= (given.charCodeAt(i) || 0) ^ (want.charCodeAt(i) || 0);
+  }
+  if (drift === 0) return null;
+  if (adminGate(request, env) === null) return null;
+  return json({ error: "loop_key_required", message: "The registry is written by the loop." }, 401);
+}
+
 function adminGate(request, env) {
   const want = String((env && env.ADMIN_KEY) || "").trim();
   if (!want) {

@@ -16,11 +16,12 @@ const MAX_LOOPS = 3;
 
 // One schema check per isolate. Every product calls /decide first, so the table
 // is created on the first arrival rather than by a migration nobody runs.
-let schemaReady = null;
+// A flag, not a promise: a promise made in one request can never settle in another,
+// and awaiting it is what failed a decide with "created by a request that has since
+// ended". The check runs once per isolate and is retried until it reports success.
+let schemaReady = false;
 function loopFor(env) {
-  const instance = createLoop(env);
-  if (!schemaReady) schemaReady = instance.ensure().catch(() => false);
-  return instance;
+  return createLoop(env);
 }
 
 // Starting the schema check is not finishing it. A write that lands while it is
@@ -29,7 +30,13 @@ function loopFor(env) {
 // still in flight. Anything that writes the journal waits for that one check.
 async function readyLoop(env) {
   const instance = loopFor(env);
-  if (schemaReady) await schemaReady;
+  if (!schemaReady) {
+    try {
+      schemaReady = (await instance.ensure()) !== false;
+    } catch {
+      schemaReady = false;
+    }
+  }
   return instance;
 }
 

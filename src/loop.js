@@ -1346,7 +1346,9 @@ export function createLoop(env, options = {}) {
       const row = (found && found.results && found.results[0]) || null;
       const mergedPrinciples = [...new Set([...parsed(row && row.principles, []), ...principles])].slice(0, 40);
       const mergedTerms = [...new Set([...parsed(row && row.terms, []), ...terms])].slice(0, 200);
-      const definition = extra.definition ? String(extra.definition).trim() : (row && row.definition) || null;
+      // What a domain is does not change because he explained a term inside it: the
+      // first definition stands, and his words become a term of the domain instead.
+      const definition = (row && row.definition) || (extra.definition ? String(extra.definition).trim() : null);
       await db
         .prepare("INSERT INTO domains (name, definition, principles, terms, first, last, seen, moves) VALUES (?, ?, ?, ?, ?, ?, 0, '{}') ON CONFLICT(name) DO UPDATE SET definition = excluded.definition, principles = excluded.principles, terms = excluded.terms, last = excluded.last")
         .bind(clean, definition, JSON.stringify(mergedPrinciples), JSON.stringify(mergedTerms), (row && row.first) || at, at)
@@ -1372,7 +1374,7 @@ export function createLoop(env, options = {}) {
     const body = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { name: clean, first: at, seen: 0, moves: {} };
     body.name = clean;
     body.last = at;
-    if (extra.definition) body.definition = String(extra.definition).trim();
+    if (extra.definition && !body.definition) body.definition = String(extra.definition).trim();
     if (principles.length) body.principles = [...new Set([...(Array.isArray(body.principles) ? body.principles : []), ...principles])].slice(0, 40);
     if (terms.length) body.terms = [...new Set([...(Array.isArray(body.terms) ? body.terms : []), ...terms])].slice(0, 200);
     body.seen = Number(body.seen || 0);

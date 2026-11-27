@@ -155,14 +155,12 @@ export const SURFACES = {
     question: 'He is speaking to the dial. What does he want done?',
     store: null,
     labels: {
-      record: 'A recording, kept',
       recordings: 'What he has recorded, shown',
       answer: 'Something said back to him',
       ask: 'He has to say more',
       unclear: 'I am not sure — ask me',
     },
     actions: {
-      record: 'He is leaving a recording, not asking anything: the take is kept on his station with the time and length it was made at. Nothing is answered, nothing is summarised, and no card is written for it.',
       recordings: 'Show what is already recorded on his station: the clips that exist, with their station, the time each was made and how long it ran. Nothing is summarised and nothing new is written.',
       answer: 'Something said back to him in place, from what she already knows or can work out. No card is drawn for this.',
       ask: 'The ask is too thin to act on: he is asked a question and nothing happens until he answers.',

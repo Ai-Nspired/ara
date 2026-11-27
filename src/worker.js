@@ -318,7 +318,13 @@ export default {
           return json({ error: "invalid_json" }, 400);
         }
         try {
-          return json(await loopFor(env).addDomain(body.name || body.domain));
+          return json(
+            await loopFor(env).addDomain(body.name || body.domain, {
+              definition: body.definition || null,
+              principles: body.principles || null,
+              terms: body.terms || null,
+            })
+          );
         } catch (error) {
           return json({ error: "domain_failed", message: String(error.message || error) }, 400);
         }

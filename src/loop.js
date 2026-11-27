@@ -368,6 +368,15 @@ export async function ask(text, options = {}) {
             (Array.isArray(options.commands) && options.commands.length
               ? ' He uses these words as commands on this surface: ' + options.commands.join(', ') + '. A bare one of them is that command, not a key and not an unknown word.'
               : '') +
+            (options.about && options.about.name
+              ? ' This ask is in the domain "' +
+                options.about.name +
+                '"' +
+                (options.about.definition ? ': ' + options.about.definition : '') +
+                (Array.isArray(options.about.principles) && options.about.principles.length
+                  ? '. What makes an answer competent in that domain: ' + options.about.principles.join('; ') + '.'
+                  : '.')
+              : '') +
             ' ' +
             IDIOM_RULE,
           criteria: asked,
@@ -892,6 +901,9 @@ export function createLoop(env, options = {}) {
     const known = await domains();
     const choices = known.length ? known : ['general'];
     const store = (SURFACES[surface] || {}).store || null;
+    // A domain he has defined takes the ask when nothing named one: that is the whole
+    // point of him defining it.
+    const placed = await domainFor(text);
     const looked = await review(domain, text, idiom, store, choices);
 
     // What the store already holds, handed over before she decides. Nothing is
@@ -917,7 +929,7 @@ export function createLoop(env, options = {}) {
     const isKey = idiom.kind === 'code' && !commands.includes(termKey(text));
     if (isKey && !held) {
       // No decider runs here, so the domain is the one he named or the default.
-      const pickedNow = choices.includes(domain) ? domain : choices[0];
+      const pickedNow = choices.includes(domain) ? domain : placed ? placed.name : choices[0];
       const at2 = clock().toISOString();
       const key2 = interactionKey(pickedNow, at2);
       // The same contract as the main path, because this is a record of the ask
@@ -964,9 +976,16 @@ export function createLoop(env, options = {}) {
         ? { move: 'unclear', scope: null, route: null, refused: false, cost: 0, model: 'the-stored-pair' }
         : isKey
           ? { move: 'result', scope: null, route: null, refused: false, cost: 0, model: 'the-key' }
-        : await ask(text, { ...askOptions, review: seen, domains: choices, commands });
+        : await ask(text, { ...askOptions, review: seen, domains: choices, commands, about: placed });
     // Her identification wins when it is a domain he has put in the list.
-    const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
+    const picked =
+      decided.scope && choices.includes(decided.scope)
+        ? decided.scope
+        : choices.includes(domain)
+          ? domain
+          : placed
+            ? placed.name
+            : choices[0];
     const at = clock().toISOString();
     // Which of the three the primary is. It mirrors `picked` exactly, including
     // the case where her scope won over a domain he also named: then the row
@@ -1088,6 +1107,36 @@ export function createLoop(env, options = {}) {
   }
 
   /** The domains he has put in KV, by name. Nothing is guessed if it is empty. */
+  /**
+   * Which domain the ask falls in, from the terms he has given each domain. The longest
+   * matching term wins, so "apple valley" beats "valley". Nothing here guesses: a term
+   * is in a domain because he put it there.
+   */
+  async function domainFor(text) {
+    if (!kv) return null;
+    const said = ' ' + termKey(text) + ' ';
+    if (!said.trim()) return null;
+    try {
+      const listed = await kv.list({ prefix: DOMAIN_PREFIX });
+      const keys = (listed?.keys || []).map((entry) => entry.name).filter(Boolean).slice(0, 50);
+      let best = null;
+      for (const key of keys) {
+        const raw = await kv.get(key);
+        const body = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+        if (!body) continue;
+        for (const term of Array.isArray(body.terms) ? body.terms : []) {
+          const needle = termKey(term);
+          if (!needle || needle.length < 3) continue;
+          if (!said.includes(' ' + needle + ' ') && !said.includes(needle + ' ')) continue;
+          if (!best || needle.length > best.length) best = { length: needle.length, body };
+        }
+      }
+      return best ? best.body : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function domains() {
     if (!kv) return [];
     try {
@@ -1106,19 +1155,32 @@ export function createLoop(env, options = {}) {
     if (!kv) return [];
     try {
       const listed = await kv.list({ prefix: DOMAIN_PREFIX });
-      return (listed?.keys || []).map((entry) => ({
-        name: (entry.metadata && entry.metadata.name) || String(entry.name || '').slice(DOMAIN_PREFIX.length),
-        seen: (entry.metadata && entry.metadata.seen) || 0,
-        last: (entry.metadata && entry.metadata.last) || null,
-        moves: (entry.metadata && entry.metadata.moves) || {},
-      }));
+      const records = [];
+      for (const entry of listed?.keys || []) {
+        const body = await kv.get(entry.name, 'json');
+        records.push({
+          name: (entry.metadata && entry.metadata.name) || (body && body.name) || String(entry.name || '').slice(DOMAIN_PREFIX.length),
+          seen: (body && body.seen) || (entry.metadata && entry.metadata.seen) || 0,
+          last: (body && body.last) || (entry.metadata && entry.metadata.last) || null,
+          moves: (body && body.moves) || {},
+          definition: (body && body.definition) || null,
+          principles: (body && Array.isArray(body.principles) ? body.principles : []),
+          terms: (body && Array.isArray(body.terms) ? body.terms : []),
+        });
+      }
+      return records;
     } catch {
       return [];
     }
   }
 
-  /** Add a domain to the list. The body and the metadata carry the same record. */
-  async function addDomain(name) {
+  /**
+   * Add or extend a domain. A domain is not a label on a decision: it is what he says
+   * it is — a definition, the principles that make an answer competent in it, and the
+   * terms that belong to it. Those three are what the loop has to fill before any ask
+   * can be decided inside a domain rather than in \`general\`.
+   */
+  async function addDomain(name, extra = {}) {
     if (!kv) throw new Error('no KV binding');
     const clean = String(name || '').trim();
     if (!clean) throw new Error('a domain needs a name');
@@ -1128,6 +1190,20 @@ export function createLoop(env, options = {}) {
     const body = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { name: clean, first: at, seen: 0, moves: {} };
     body.name = clean;
     body.last = at;
+    // His words are kept as he gave them; a second telling extends rather than replaces.
+    if (extra.definition != null) {
+      const definition = String(extra.definition).trim();
+      if (definition) body.definition = definition;
+    }
+    const added = (list) => (Array.isArray(list) ? list : list ? [list] : []).map((x) => String(x).trim()).filter(Boolean);
+    const principles = added(extra.principles);
+    if (principles.length) {
+      body.principles = [...new Set([...(Array.isArray(body.principles) ? body.principles : []), ...principles])].slice(0, 40);
+    }
+    const terms = added(extra.terms).map(termKey).filter(Boolean);
+    if (terms.length) {
+      body.terms = [...new Set([...(Array.isArray(body.terms) ? body.terms : []), ...terms])].slice(0, 200);
+    }
     body.seen = Number(body.seen || 0);
     body.moves = body.moves || {};
     await kv.put(key, JSON.stringify(body), {

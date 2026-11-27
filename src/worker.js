@@ -10,7 +10,7 @@
 //   POST /resolve?stream=1  → SSE stream
 //   GET  /health            → { status, kv, pulse, latencyMs }
 
-import { createLoop, idiomOf } from './loop.js';
+import { createLoop, idiomOf, knownTerms, recordTerm } from './loop.js';
 
 const MAX_LOOPS = 3;
 

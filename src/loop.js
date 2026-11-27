@@ -590,6 +590,9 @@ export function idiomOf(text) {
   // A word, or two words and no sentence around them: that is a key looking for
   // its pair, not prose. Plain language has verbs and articles in it.
   if (words.length <= 2 && !/[.!]$/.test(raw) && !/^(a|an|the)\b/i.test(low)) {
+    // A lowercase word with a code attached is an address he placed, not a key
+    // looking for a pair: `kyle003` names a page, and the page is the answer.
+    if (/^[a-z][a-z-]*[0-9]{2,4}$/.test(low)) return { kind: 'microsite', name: IDIOM_NAMES.microsite };
     return { kind: 'code', name: IDIOM_NAMES.code };
   }
   if (raw.length <= 24 && words.length <= 3) return { kind: 'short', name: IDIOM_NAMES.short };
@@ -1008,6 +1011,44 @@ export function createLoop(env, options = {}) {
     // that command, not a key looking for a pair.
     const commands = await knownTerms(db, surface);
     const isKey = idiom.kind === 'code' && !commands.includes(termKey(text));
+    // An address is resolved, not patched. Either she can learn this: whoever hears
+    // the name records it once, and the record is the same row for both of them.
+    if (idiom.kind === 'microsite') {
+      const sharedM = await sharedCard(text);
+      const atM = clock().toISOString();
+      const pickedM = choices.includes(domain) ? domain : placed ? placed.name : choices[0];
+      if (sharedM) {
+        // One term, one address: an upsert, so hearing it twice does not double it.
+        try {
+          await addDomain('microsite', {
+            definition: 'A page he placed, addressed by the name he gave it.',
+            terms: [termKey(text)],
+            means: sharedM.url || null,
+          });
+        } catch {
+          /* the address still resolves; the record can wait */
+        }
+        return {
+          id: null, key: interactionKey(pickedM, atM), at: atM,
+          move: 'result', domain: pickedM, surface, route: null, refused: false, cost: 0,
+          confidence: null, band: 'unmeasured',
+          confidence_basis: { move: 'result', shape: 'a microsite he placed', asks: 1, right: 0, wrong: 0 },
+          reviewed: looked.count, notes: looked.text || null,
+          text: sharedM.text, question: String(text), options: [], card: null,
+          microsite: { n: sharedM.n, url: sharedM.url },
+        };
+      }
+      return {
+        id: null, key: interactionKey(pickedM, atM), at: atM,
+        move: 'unclear', domain: pickedM, surface, route: null, refused: false, cost: 0,
+        confidence: null, band: 'unmeasured',
+        confidence_basis: { move: 'unclear', shape: 'an address with no page behind it', asks: 1, right: 0, wrong: 0 },
+        reviewed: looked.count, notes: looked.text || null,
+        text: clip(text, 60) + ' reads as an address, and I have no page under that name.',
+        question: String(text), options: [], card: null,
+      };
+    }
+
     if (isKey && !held) {
       // The key may name a card he already has. That is still a pair, read where it
       // lives, and the card is the answer rather than "nothing stored for it".

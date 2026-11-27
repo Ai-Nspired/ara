@@ -1306,6 +1306,8 @@ export function createLoop(env, options = {}) {
     const terms = listOf(extra.terms).map((term) => term.toLowerCase().replace(/\s+/g, ' '));
 
     if (db) {
+      // The registry is created by the first write, not by whoever remembered to migrate.
+      await ensure();
       const found = await db.prepare('SELECT definition, principles, terms, first FROM domains WHERE name = ?').bind(clean).all();
       const row = (found && found.results && found.results[0]) || null;
       const mergedPrinciples = [...new Set([...parsed(row && row.principles, []), ...principles])].slice(0, 40);

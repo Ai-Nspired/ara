@@ -266,6 +266,30 @@ export default {
     // The loop's own writes and its journal are the owner's business: mind calls
     // these every turn, so it holds the key, and nothing anonymous can write a
     // verdict into the journal that grades her.
+    if (url.pathname === "/terms" && request.method === "POST") {
+      let body = null;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "invalid_json" }, 400);
+      }
+      await readyLoop(env);
+      const stored = await recordTerm(env.DB, {
+        term: body.term,
+        kind: body.kind || "command",
+        surface: body.surface || null,
+        app: body.app || null,
+      });
+      const known = await knownTerms(env.DB, body.surface || null);
+      return json({ ok: !!stored, term: stored, known });
+    }
+
+    if (url.pathname === "/terms" && request.method === "GET") {
+      await readyLoop(env);
+      const surface = url.searchParams.get("surface");
+      return json({ surface: surface || null, known: await knownTerms(env.DB, surface || null) });
+    }
+
     if (url.pathname === "/feedback" && request.method === "POST") {
       const denied = adminGate(request, env);
       if (denied) return denied;

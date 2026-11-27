@@ -57,8 +57,57 @@ export const SCHEMA = [
   `ALTER TABLE decisions ADD COLUMN intent_confidence REAL`,
   `ALTER TABLE decisions ADD COLUMN domain_confidence REAL`,
   `ALTER TABLE decisions ADD COLUMN evidence_confidence REAL`,
+  // The words the surface in front of him handles itself. A surface reports each one as
+  // it uses it, so this is learned from what happens rather than written into her: a
+  // bare command is not a key waiting for a pair.
+  `CREATE TABLE IF NOT EXISTS terms (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  term    TEXT NOT NULL,
+  kind    TEXT NOT NULL DEFAULT 'command',
+  surface TEXT,
+  app     TEXT,
+  hits    INTEGER NOT NULL DEFAULT 1,
+  at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(term, surface)
+)`,
+  `CREATE INDEX IF NOT EXISTS terms_surface ON terms (surface, kind)`,
 ];
 
+
+/** A word as it is compared: lower case, no punctuation, single spaces. */
+export function termKey(text) {
+  return String(text || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** The commands this surface has reported. Nothing is assumed about a word not here. */
+export async function knownTerms(db, surface) {
+  if (!db) return [];
+  try {
+    const rows = await db
+      .prepare("SELECT term FROM terms WHERE kind = 'command' AND (surface = ? OR surface IS NULL) ORDER BY hits DESC LIMIT 40")
+      .bind(surface || null)
+      .all();
+    return ((rows && rows.results) || []).map((row) => row.term).filter(Boolean);
+  } catch (error) {
+    return [];
+  }
+}
+
+/** A surface saying "this word is mine": counted, not replaced, so use is the evidence. */
+export async function recordTerm(db, { term, kind = 'command', surface = null, app = null } = {}) {
+  if (!db) return null;
+  const key = termKey(term);
+  if (!key) return null;
+  try {
+    await db
+      .prepare("INSERT INTO terms (term, kind, surface, app, hits) VALUES (?, ?, ?, ?, 1) ON CONFLICT(term, surface) DO UPDATE SET hits = hits + 1, at = datetime('now')")
+      .bind(key, kind, surface, app)
+      .run();
+    return key;
+  } catch (error) {
+    return null;
+  }
+}
 
 /**
  * What she is choosing between is what the surface in front of her can actually
@@ -314,7 +363,13 @@ export async function ask(text, options = {}) {
       questions: {
         intent: {
           type: 'choice',
-          instructions: (surface ? surface.question : INTENT_QUESTION) + ' ' + IDIOM_RULE,
+          instructions:
+            (surface ? surface.question : INTENT_QUESTION) +
+            (Array.isArray(options.commands) && options.commands.length
+              ? ' He uses these words as commands on this surface: ' + options.commands.join(', ') + '. A bare one of them is that command, not a key and not an unknown word.'
+              : '') +
+            ' ' +
+            IDIOM_RULE,
           criteria: asked,
         },
         ...(options.domains && options.domains.length
@@ -856,7 +911,10 @@ export function createLoop(env, options = {}) {
     // A bare word with digits on the end is a key, not a question: it is looking
     // for a stored pair. Found, that pair is the result. Not found, there is
     // nothing to answer and nothing to write until he says what it should be.
-    const isKey = idiom.kind === 'code';
+    // What the surface handles itself, learned from its reports: a bare one of these is
+    // that command, not a key looking for a pair.
+    const commands = await knownTerms(db, surface);
+    const isKey = idiom.kind === 'code' && !commands.includes(termKey(text));
     if (isKey && !held) {
       // No decider runs here, so the domain is the one he named or the default.
       const pickedNow = choices.includes(domain) ? domain : choices[0];
@@ -906,7 +964,7 @@ export function createLoop(env, options = {}) {
         ? { move: 'unclear', scope: null, route: null, refused: false, cost: 0, model: 'the-stored-pair' }
         : isKey
           ? { move: 'result', scope: null, route: null, refused: false, cost: 0, model: 'the-key' }
-        : await ask(text, { ...askOptions, review: seen, domains: choices });
+        : await ask(text, { ...askOptions, review: seen, domains: choices, commands });
     // Her identification wins when it is a domain he has put in the list.
     const picked = decided.scope && choices.includes(decided.scope) ? decided.scope : choices.includes(domain) ? domain : choices[0];
     const at = clock().toISOString();

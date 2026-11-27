@@ -749,6 +749,21 @@ export function createLoop(env, options = {}) {
   const db = env && env.DB ? env.DB : null;
   const kv = env && env.KV ? env.KV : null;
 
+  /** A name he uses that is the name of a card he already has. cods holds it, and
+   * the pair is the key, not a row in a store of pairs. */
+  async function sharedCard(text) {
+    const cods = env && env.CODS;
+    if (!cods || typeof cods.fetch !== 'function') return null;
+    try {
+      const res = await cods.fetch('https://cods/find?n=' + encodeURIComponent(termKey(text)));
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok || !data.text) return null;
+      return { n: data.n || termKey(text), url: data.url || null, text: clip(String(data.text), 1200) };
+    } catch {
+      return null;
+    }
+  }
+
   async function ensure() {
     if (!db) return false;
     for (const statement of SCHEMA) {
@@ -994,6 +1009,22 @@ export function createLoop(env, options = {}) {
     const commands = await knownTerms(db, surface);
     const isKey = idiom.kind === 'code' && !commands.includes(termKey(text));
     if (isKey && !held) {
+      // The key may name a card he already has. That is still a pair, read where it
+      // lives, and the card is the answer rather than "nothing stored for it".
+      const shared = await sharedCard(text);
+      if (shared) {
+        const atS = clock().toISOString();
+        const pickedS = choices.includes(domain) ? domain : placed ? placed.name : choices[0];
+        return {
+          id: null, key: interactionKey(pickedS, atS), at: atS,
+          move: 'result', domain: pickedS, surface, route: null, refused: false, cost: 0,
+          confidence: null, band: 'unmeasured',
+          confidence_basis: { move: 'result', shape: 'a card he has', asks: 1, right: 0, wrong: 0 },
+          reviewed: looked.count, notes: looked.text || null,
+          text: shared.text, question: String(text), options: [], card: null,
+          shared: { n: shared.n, url: shared.url },
+        };
+      }
       // No decider runs here, so the domain is the one he named or the default.
       const pickedNow = choices.includes(domain) ? domain : placed ? placed.name : choices[0];
       const at2 = clock().toISOString();

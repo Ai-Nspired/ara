@@ -1226,26 +1226,33 @@ export function createLoop(env, options = {}) {
     return [];
   }
 
+  /**
+   * Every domain she has, wherever it is written. D1 is the registry; a domain that is
+   * only in KV is older, not gone — reading both is what keeps "general" in her choices
+   * while the registry fills up.
+   */
   async function domains() {
+    const names = new Set();
     if (db) {
       try {
         const found = await db.prepare('SELECT name FROM domains ORDER BY seen DESC LIMIT 200').all();
-        const names = ((found && found.results) || []).map((row) => row.name).filter(Boolean);
-        if (names.length) return names;
+        for (const row of (found && found.results) || []) if (row && row.name) names.add(row.name);
       } catch {
-        /* no table yet, or no DB: the KV list below still answers */
+        /* no table yet: the KV list below still answers */
       }
     }
-    if (!kv) return [];
-    try {
-      const listed = await kv.list({ prefix: DOMAIN_PREFIX });
-      const keys = listed?.keys || [];
-      return keys
-        .map((entry) => (entry.metadata && entry.metadata.name) || String(entry.name || '').slice(DOMAIN_PREFIX.length))
-        .filter(Boolean);
-    } catch {
-      return [];
+    if (kv) {
+      try {
+        const listed = await kv.list({ prefix: DOMAIN_PREFIX });
+        for (const entry of listed?.keys || []) {
+          const name = (entry.metadata && entry.metadata.name) || String(entry.name || '').slice(DOMAIN_PREFIX.length);
+          if (name) names.add(name);
+        }
+      } catch {
+        /* nothing listed: D1 already answered */
+      }
     }
+    return [...names];
   }
 
   async function domainRecords() {
@@ -1266,7 +1273,34 @@ export function createLoop(env, options = {}) {
             related: await relatedDomains(row.name),
           });
         }
-        if (records.length) return records;
+        if (records.length) {
+          // A domain written before the registry existed is still hers: it is read from
+          // KV and returned beside the D1 rows rather than dropped.
+          if (kv) {
+            try {
+              const listed = await kv.list({ prefix: DOMAIN_PREFIX });
+              const have = new Set(records.map((record) => record.name));
+              for (const entry of listed?.keys || []) {
+                const body = await kv.get(entry.name, 'json');
+                const name = (body && body.name) || (entry.metadata && entry.metadata.name);
+                if (!name || have.has(name)) continue;
+                records.push({
+                  name,
+                  seen: (body && body.seen) || 0,
+                  last: (body && body.last) || null,
+                  moves: (body && body.moves) || {},
+                  definition: (body && body.definition) || null,
+                  principles: (body && Array.isArray(body.principles) ? body.principles : []),
+                  terms: (body && Array.isArray(body.terms) ? body.terms : []),
+                  related: [],
+                });
+              }
+            } catch {
+              /* D1 rows stand on their own */
+            }
+          }
+          return records;
+        }
       } catch {
         /* fall through to KV */
       }

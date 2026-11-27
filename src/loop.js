@@ -381,6 +381,18 @@ export async function ask(text, options = {}) {
     ? [written, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))]
     : written;
 
+  // What the surface pulled from the tables: rows that may already answer this ask.
+  const candidates = (Array.isArray(options.stored) ? options.stored : options.stored ? [options.stored] : [])
+    .filter((row) => row && row.answer)
+    .slice(0, 6);
+  const candidateNote = candidates.length
+    ? '\n\nRows that may already answer this ask:\n' +
+      candidates
+        .map((row, i) => `(${i + 1}) asked: "${clip(String(row.asked || row.key || ''), 120)}" -> answered: "${clip(String(row.answer), 220)}"`)
+        .join('\n')
+    : '';
+  const stated = candidateNote ? String(state) + candidateNote : state;
+
   const started = Date.now();
   const response = await fetchImpl(DECISIONS_URL, {
     method: 'POST',
@@ -390,7 +402,7 @@ export async function ask(text, options = {}) {
     },
     body: JSON.stringify({
       model,
-      state,
+      state: stated,
       questions: {
         intent: {
           type: 'choice',
@@ -425,6 +437,19 @@ export async function ask(text, options = {}) {
               },
             }
           : {}),
+        ...(candidates.length
+          ? {
+              recall: {
+                type: 'choice',
+                instructions:
+                  'Is one of the rows above the same ask he is making now? Pick its number if it is. Pick none if none of them is the same ask, or if the stored answer is a question back at him rather than an answer.',
+                criteria: Object.fromEntries([
+                  ...candidates.map((row, i) => ['row' + (i + 1), 'row ' + (i + 1) + ': ' + clip(String(row.asked || row.key || ''), 60)]),
+                  ['none', 'none of these is the same ask'],
+                ]),
+              },
+            }
+          : {}),
         ...(surface ? {} : {
           route: {
             type: 'choice',
@@ -448,6 +473,7 @@ export async function ask(text, options = {}) {
   const answer = (data && data.answers && data.answers.intent) || null;
   const route = (data && data.answers && data.answers.route) || null;
   const scope = (data && data.answers && data.answers.scope) || null;
+  const recall = (data && data.answers && data.answers.recall) || null;
 
   if (!answer || answer.type === 'refusal') {
     return { move: null, route: null, refused: true, probabilities: null, confidence: null, routeConfidence: null, cost: data?.usage?.cost ?? null, ms, model: data?.model || model };
@@ -458,6 +484,7 @@ export async function ask(text, options = {}) {
     scope: scope && scope.type !== 'refusal' ? scope.choice ?? null : null,
     route: route && route.type !== 'refusal' ? route.choice ?? null : null,
     refused: false,
+    recall: recall && recall.type !== 'refusal' ? recall.choice ?? null : null,
     probabilities: answer.probabilities || null,
     confidence: answer.confidence ?? null,
     routes: route && route.type !== 'refusal' ? route.probabilities || null : null,
@@ -943,7 +970,10 @@ export function createLoop(env, options = {}) {
     // What the store already holds, handed over before she decides. Nothing is
     // generated to find this out: a pair that already exists is either the
     // result, or it is not and she has to ask him.
-    const held = askOptions.stored && askOptions.stored.answer ? askOptions.stored : null;
+    const candidates = (Array.isArray(askOptions.stored) ? askOptions.stored : askOptions.stored ? [askOptions.stored] : [])
+      .filter((row) => row && row.answer)
+      .slice(0, 6);
+    const held = candidates[0] || null;
     const heldNote = held
       ? `The store already holds this ask: "${clip(String(held.answer), 220)}" (layer ${held.layer}${held.key ? `, ${held.key}` : ''}). ` +
         'If that is the result he is after, result is the answer. If it comes back as a question instead of an answer, or it was never verified, it is not the result: ask him.'
@@ -1093,6 +1123,21 @@ export function createLoop(env, options = {}) {
           clarify: true,
         }),
         answer: clip(held.answer, 240),
+      };
+    }
+
+    // One of the rows she was shown is the same ask: that row is the result, and it
+    // is hers to pick rather than a surface's similarity match deciding for her.
+    const pick = decided.recall && /^row(\d+)$/.test(String(decided.recall)) ? candidates[Number(String(decided.recall).slice(3)) - 1] : null;
+    if (pick) {
+      return {
+        id, key, at, move: 'result', domain: picked, surface, route: decided.route, refused: false,
+        cost: decided.cost,
+        recalled: { asked: pick.asked || pick.key || null, at: pick.at || null, layer: pick.layer || null },
+        confidence: measured.confidence, band: measured.band,
+        confidence_basis: measured.basis, reviewed: looked.count,
+        notes: looked.text || null,
+        text: String(pick.answer), question: String(text), options: [], card: null,
       };
     }
 
@@ -1410,7 +1455,15 @@ export function createLoop(env, options = {}) {
         if (parts.some((w) => !saidSet.has(w))) continue;
         if (!best || parts.length > best.size) best = { size: parts.length, row };
       }
-      return best ? { term: best.row.term, domain: best.row.domain, means: best.row.means } : null;
+      if (!best) return null;
+      const matches = ((found && found.results) || [])
+        .filter((row) => {
+          const parts = wordsOf(row.term);
+          return parts.length && !parts.some((w) => !saidSet.has(w));
+        })
+        .slice(0, 6)
+        .map((row) => ({ term: row.term, domain: row.domain, means: row.means }));
+      return { term: best.row.term, domain: best.row.domain, means: best.row.means, matches };
     } catch {
       return null;
     }

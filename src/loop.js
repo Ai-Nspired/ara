@@ -973,7 +973,9 @@ export function createLoop(env, options = {}) {
     const candidates = (Array.isArray(askOptions.stored) ? askOptions.stored : askOptions.stored ? [askOptions.stored] : [])
       .filter((row) => row && row.answer)
       .slice(0, 6);
-    const held = candidates[0] || null;
+    // One row handed over is the caller's claim that it is the answer; a list is a
+    // question, and whether one of them is the same ask is hers to answer.
+    const held = Array.isArray(askOptions.stored) ? null : candidates[0] || null;
     const heldNote = held
       ? `The store already holds this ask: "${clip(String(held.answer), 220)}" (layer ${held.layer}${held.key ? `, ${held.key}` : ''}). ` +
         'If that is the result he is after, result is the answer. If it comes back as a question instead of an answer, or it was never verified, it is not the result: ask him.'

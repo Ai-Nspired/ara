@@ -326,11 +326,20 @@ export default {
           principles: body.principles || null,
           terms: [concept, ...(Array.isArray(body.terms) ? body.terms : [])],
           relates: body.relates || null,
+          // What the term resolves to, when the surface heard him say it.
+          means: body.means || null,
         });
         return json({ ok: true, domain: record });
       } catch (error) {
         return json({ error: "domain_failed", message: String(error.message || error) }, 400);
       }
+    }
+
+    // What a term he taught means, read from her table so a surface need not keep a
+    // copy of its own that drifts from what she knows.
+    if (url.pathname === "/domains/means" && request.method === "GET") {
+      const found = await loopFor(env).termMeans(url.searchParams.get("term") || "");
+      return json(found ? { ok: true, ...found } : { ok: false });
     }
 
     if (url.pathname === "/domains") {

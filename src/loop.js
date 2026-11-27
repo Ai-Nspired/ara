@@ -90,6 +90,9 @@ export const SCHEMA = [
   PRIMARY KEY (term, domain)
 )`,
   `CREATE INDEX IF NOT EXISTS domain_terms_domain ON domain_terms (domain)`,
+  // What a term resolves to: the answer he gave for it. Without this a term only
+  // says where it belongs, and a surface cannot use it to answer.
+  `ALTER TABLE domain_terms ADD COLUMN means TEXT`,
   // Domains are not islands: the whole point is moving between them and seeing how one
   // bears on another.
   `CREATE TABLE IF NOT EXISTS domain_links (
@@ -1353,8 +1356,14 @@ export function createLoop(env, options = {}) {
         .prepare("INSERT INTO domains (name, definition, principles, terms, first, last, seen, moves) VALUES (?, ?, ?, ?, ?, ?, 0, '{}') ON CONFLICT(name) DO UPDATE SET definition = excluded.definition, principles = excluded.principles, terms = excluded.terms, last = excluded.last")
         .bind(clean, definition, JSON.stringify(mergedPrinciples), JSON.stringify(mergedTerms), (row && row.first) || at, at)
         .run();
+      const means = extra.means ? String(extra.means).trim().slice(0, 300) : null;
       for (const term of mergedTerms) {
-        await db.prepare('INSERT OR IGNORE INTO domain_terms (term, domain) VALUES (?, ?)').bind(term, clean).run();
+        // The meaning is written once and kept: a later pass that carries none does
+        // not erase what he already said it was.
+        await db
+          .prepare('INSERT INTO domain_terms (term, domain, means) VALUES (?, ?, ?) ON CONFLICT(term, domain) DO UPDATE SET means = COALESCE(excluded.means, domain_terms.means)')
+          .bind(term, clean, means)
+          .run();
       }
       const links = Array.isArray(extra.relates) ? extra.relates : [];
       for (const link of links) {
@@ -1383,6 +1392,28 @@ export function createLoop(env, options = {}) {
       metadata: { name: body.name, seen: body.seen, last: body.last, moves: body.moves },
     });
     return body;
+  }
+
+  /** What she was told a term means — read from her table, not from a surface's copy.
+   * A term counts as said when every word of it is in the ask. */
+  async function termMeans(text) {
+    if (!db) return null;
+    const said = wordsOf(text);
+    if (!said.length) return null;
+    const saidSet = new Set(said);
+    try {
+      const found = await db.prepare('SELECT term, domain, means FROM domain_terms WHERE means IS NOT NULL LIMIT 500').all();
+      let best = null;
+      for (const row of (found && found.results) || []) {
+        const parts = wordsOf(row.term);
+        if (!parts.length) continue;
+        if (parts.some((w) => !saidSet.has(w))) continue;
+        if (!best || parts.length > best.size) best = { size: parts.length, row };
+      }
+      return best ? { term: best.row.term, domain: best.row.domain, means: best.row.means } : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Tracking: the domain she decided in gets a visit and the move she made. */
@@ -1517,5 +1548,5 @@ export function createLoop(env, options = {}) {
     }
   }
 
-  return { ensure, arrive, outcome, feedback, progress, recent, detail, review, domains, domainRecords, addDomain };
+  return { ensure, arrive, outcome, feedback, progress, recent, detail, review, domains, domainRecords, addDomain, termMeans };
 }

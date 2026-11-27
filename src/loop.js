@@ -71,6 +71,34 @@ export const SCHEMA = [
   UNIQUE(term, surface)
 )`,
   `CREATE INDEX IF NOT EXISTS terms_surface ON terms (surface, kind)`,
+  // A domain is a record, not a label on a decision: what it is, what makes an answer
+  // competent in it, the words that belong to it, and what it relates to. D1, because
+  // this is her registry and a KV namespace is a cache.
+  `CREATE TABLE IF NOT EXISTS domains (
+  name        TEXT PRIMARY KEY,
+  definition  TEXT,
+  principles  TEXT,
+  terms       TEXT,
+  first       TEXT,
+  last        TEXT,
+  seen        INTEGER NOT NULL DEFAULT 0,
+  moves       TEXT
+)`,
+  `CREATE TABLE IF NOT EXISTS domain_terms (
+  term   TEXT NOT NULL,
+  domain TEXT NOT NULL,
+  PRIMARY KEY (term, domain)
+)`,
+  `CREATE INDEX IF NOT EXISTS domain_terms_domain ON domain_terms (domain)`,
+  // Domains are not islands: the whole point is moving between them and seeing how one
+  // bears on another.
+  `CREATE TABLE IF NOT EXISTS domain_links (
+  from_domain TEXT NOT NULL,
+  to_domain   TEXT NOT NULL,
+  relation    TEXT,
+  at          TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (from_domain, to_domain)
+)`,
 ];
 
 
@@ -375,7 +403,10 @@ export async function ask(text, options = {}) {
                 (options.about.definition ? ': ' + options.about.definition : '') +
                 (Array.isArray(options.about.principles) && options.about.principles.length
                   ? '. What makes an answer competent in that domain: ' + options.about.principles.join('; ') + '.'
-                  : '.')
+                  : '.') +
+                (Array.isArray(options.about.related) && options.about.related.length
+                  ? ' It relates to: ' + options.about.related.map((link) => link.domain + (link.relation ? ' (' + link.relation + ')' : '')).join(', ') + '.'
+                  : '')
               : '') +
             ' ' +
             IDIOM_RULE,
@@ -1107,37 +1138,104 @@ export function createLoop(env, options = {}) {
   }
 
   /** The domains he has put in KV, by name. Nothing is guessed if it is empty. */
+  /** Words do not name a domain on their own. */
+  const DOMAIN_STOP = new Set('the and for near this that what with from are was his her you him how why when where who does did can not but all any one two out get got has have had its our their them they she about into over under than then there here more most some such only also just like make made use used using off own same too very will would should could may might must been being were which while after before because between both each few other again against further once during above below toward towards across around'.split(' '));
+
+  const wordsOf = (text) =>
+    String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !DOMAIN_STOP.has(w));
+
+  const parsed = (value, fallback) => {
+    if (value == null) return fallback;
+    if (typeof value !== 'string') return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  };
+
   /**
-   * Which domain the ask falls in, from the terms he has given each domain. The longest
-   * matching term wins, so "apple valley" beats "valley". Nothing here guesses: a term
-   * is in a domain because he put it there.
+   * Which domain the ask is in the realm of — not which one it names. Each term a domain
+   * carries is matched by its words, and half of a term's words is enough: "valley" is
+   * in the realm of "apple valley". The best share wins, then the longer term.
    */
   async function domainFor(text) {
-    if (!kv) return null;
-    const said = ' ' + termKey(text) + ' ';
-    if (!said.trim()) return null;
-    try {
-      const listed = await kv.list({ prefix: DOMAIN_PREFIX });
-      const keys = (listed?.keys || []).map((entry) => entry.name).filter(Boolean).slice(0, 50);
-      let best = null;
-      for (const key of keys) {
-        const raw = await kv.get(key);
-        const body = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
-        if (!body) continue;
-        for (const term of Array.isArray(body.terms) ? body.terms : []) {
-          const needle = termKey(term);
-          if (!needle || needle.length < 3) continue;
-          if (!said.includes(' ' + needle + ' ') && !said.includes(needle + ' ')) continue;
-          if (!best || needle.length > best.length) best = { length: needle.length, body };
-        }
+    const said = wordsOf(text);
+    if (!said.length) return null;
+    const saidSet = new Set(said);
+    let records = [];
+    if (db) {
+      try {
+        const found = await db.prepare('SELECT name, definition, principles, terms FROM domains WHERE name <> ? LIMIT 200').bind('general').all();
+        records = ((found && found.results) || []).map((row) => ({
+          name: row.name,
+          definition: row.definition || null,
+          principles: parsed(row.principles, []),
+          terms: parsed(row.terms, []),
+        }));
+      } catch {
+        records = [];
       }
-      return best ? best.body : null;
-    } catch {
-      return null;
     }
+    if (!records.length && kv) {
+      try {
+        const listed = await kv.list({ prefix: DOMAIN_PREFIX });
+        for (const entry of listed?.keys || []) {
+          const body = await kv.get(entry.name, 'json');
+          if (body && body.name) records.push(body);
+        }
+      } catch {
+        records = [];
+      }
+    }
+    let best = null;
+    for (const record of records) {
+      for (const term of Array.isArray(record.terms) ? record.terms : []) {
+        const parts = wordsOf(term);
+        if (!parts.length) continue;
+        const share = parts.filter((w) => saidSet.has(w)).length / parts.length;
+        if (share < 0.5) continue;
+        const score = share * 1000 + parts.length;
+        if (!best || score > best.score) best = { score, body: record };
+      }
+    }
+    if (!best) return null;
+    const record = best.body;
+    record.related = await relatedDomains(record.name);
+    return record;
+  }
+
+  /** What a domain bears on, in both directions. */
+  async function relatedDomains(name) {
+    if (!name) return [];
+    if (db) {
+      try {
+        const found = await db
+          .prepare('SELECT to_domain AS domain, relation FROM domain_links WHERE from_domain = ? UNION SELECT from_domain AS domain, relation FROM domain_links WHERE to_domain = ? LIMIT 20')
+          .bind(name, name)
+          .all();
+        return ((found && found.results) || []).filter((row) => row.domain);
+      } catch {
+        return [];
+      }
+    }
+    return [];
   }
 
   async function domains() {
+    if (db) {
+      try {
+        const found = await db.prepare('SELECT name FROM domains ORDER BY seen DESC LIMIT 200').all();
+        const names = ((found && found.results) || []).map((row) => row.name).filter(Boolean);
+        if (names.length) return names;
+      } catch {
+        /* no table yet, or no DB: the KV list below still answers */
+      }
+    }
     if (!kv) return [];
     try {
       const listed = await kv.list({ prefix: DOMAIN_PREFIX });
@@ -1150,8 +1248,29 @@ export function createLoop(env, options = {}) {
     }
   }
 
-  /** The list as she tracks it: name, when it was first and last seen, and the moves. */
   async function domainRecords() {
+    if (db) {
+      try {
+        const found = await db.prepare('SELECT name, definition, principles, terms, seen, last, moves FROM domains ORDER BY seen DESC LIMIT 200').all();
+        const rows = (found && found.results) || [];
+        const records = [];
+        for (const row of rows) {
+          records.push({
+            name: row.name,
+            seen: Number(row.seen || 0),
+            last: row.last || null,
+            moves: parsed(row.moves, {}),
+            definition: row.definition || null,
+            principles: parsed(row.principles, []),
+            terms: parsed(row.terms, []),
+            related: await relatedDomains(row.name),
+          });
+        }
+        if (records.length) return records;
+      } catch {
+        /* fall through to KV */
+      }
+    }
     if (!kv) return [];
     try {
       const listed = await kv.list({ prefix: DOMAIN_PREFIX });
@@ -1175,35 +1294,51 @@ export function createLoop(env, options = {}) {
   }
 
   /**
-   * Add or extend a domain. A domain is not a label on a decision: it is what he says
-   * it is — a definition, the principles that make an answer competent in it, and the
-   * terms that belong to it. Those three are what the loop has to fill before any ask
-   * can be decided inside a domain rather than in \`general\`.
+   * Add or extend a domain. His words are kept as he gave them; a second telling extends
+   * rather than replaces, so the registry grows by what he says and nothing is retired.
    */
   async function addDomain(name, extra = {}) {
-    if (!kv) throw new Error('no KV binding');
     const clean = String(name || '').trim();
     if (!clean) throw new Error('a domain needs a name');
-    const key = DOMAIN_PREFIX + slug(clean);
     const at = clock().toISOString();
+    const listOf = (value) => (Array.isArray(value) ? value : value ? [value] : []).map((x) => String(x).trim()).filter(Boolean);
+    const principles = listOf(extra.principles);
+    const terms = listOf(extra.terms).map((term) => term.toLowerCase().replace(/\s+/g, ' '));
+
+    if (db) {
+      const found = await db.prepare('SELECT definition, principles, terms, first FROM domains WHERE name = ?').bind(clean).all();
+      const row = (found && found.results && found.results[0]) || null;
+      const mergedPrinciples = [...new Set([...parsed(row && row.principles, []), ...principles])].slice(0, 40);
+      const mergedTerms = [...new Set([...parsed(row && row.terms, []), ...terms])].slice(0, 200);
+      const definition = extra.definition ? String(extra.definition).trim() : (row && row.definition) || null;
+      await db
+        .prepare("INSERT INTO domains (name, definition, principles, terms, first, last, seen, moves) VALUES (?, ?, ?, ?, ?, ?, 0, '{}') ON CONFLICT(name) DO UPDATE SET definition = excluded.definition, principles = excluded.principles, terms = excluded.terms, last = excluded.last")
+        .bind(clean, definition, JSON.stringify(mergedPrinciples), JSON.stringify(mergedTerms), (row && row.first) || at, at)
+        .run();
+      for (const term of mergedTerms) {
+        await db.prepare('INSERT OR IGNORE INTO domain_terms (term, domain) VALUES (?, ?)').bind(term, clean).run();
+      }
+      const links = Array.isArray(extra.relates) ? extra.relates : [];
+      for (const link of links) {
+        const to = String((link && (link.domain || link.to)) || '').trim();
+        if (!to) continue;
+        await db
+          .prepare('INSERT OR REPLACE INTO domain_links (from_domain, to_domain, relation) VALUES (?, ?, ?)')
+          .bind(clean, to, String((link && link.relation) || '').trim() || null)
+          .run();
+      }
+      return { name: clean, definition, principles: mergedPrinciples, terms: mergedTerms, last: at };
+    }
+
+    if (!kv) throw new Error('no store for domains');
+    const key = DOMAIN_PREFIX + slug(clean);
     const raw = await kv.get(key);
     const body = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : { name: clean, first: at, seen: 0, moves: {} };
     body.name = clean;
     body.last = at;
-    // His words are kept as he gave them; a second telling extends rather than replaces.
-    if (extra.definition != null) {
-      const definition = String(extra.definition).trim();
-      if (definition) body.definition = definition;
-    }
-    const added = (list) => (Array.isArray(list) ? list : list ? [list] : []).map((x) => String(x).trim()).filter(Boolean);
-    const principles = added(extra.principles);
-    if (principles.length) {
-      body.principles = [...new Set([...(Array.isArray(body.principles) ? body.principles : []), ...principles])].slice(0, 40);
-    }
-    const terms = added(extra.terms).map(termKey).filter(Boolean);
-    if (terms.length) {
-      body.terms = [...new Set([...(Array.isArray(body.terms) ? body.terms : []), ...terms])].slice(0, 200);
-    }
+    if (extra.definition) body.definition = String(extra.definition).trim();
+    if (principles.length) body.principles = [...new Set([...(Array.isArray(body.principles) ? body.principles : []), ...principles])].slice(0, 40);
+    if (terms.length) body.terms = [...new Set([...(Array.isArray(body.terms) ? body.terms : []), ...terms])].slice(0, 200);
     body.seen = Number(body.seen || 0);
     body.moves = body.moves || {};
     await kv.put(key, JSON.stringify(body), {
@@ -1214,7 +1349,25 @@ export function createLoop(env, options = {}) {
 
   /** Tracking: the domain she decided in gets a visit and the move she made. */
   async function trackedDomain(name, move, at) {
-    if (!kv || !name) return null;
+    if (!name) return null;
+    if (db) {
+      try {
+        const found = await db.prepare('SELECT moves FROM domains WHERE name = ?').bind(name).all();
+        const row = found && found.results && found.results[0];
+        if (row) {
+          const moves = parsed(row.moves, {});
+          if (move) moves[move] = (moves[move] || 0) + 1;
+          await db.prepare('UPDATE domains SET seen = seen + 1, last = ?, moves = ? WHERE name = ?').bind(at, JSON.stringify(moves), name).run();
+          return { name, moves };
+        }
+        await addDomain(name, {});
+        await db.prepare("UPDATE domains SET seen = seen + 1, last = ?, moves = ? WHERE name = ?").bind(at, JSON.stringify(move ? { [move]: 1 } : {}), name).run();
+        return { name };
+      } catch {
+        return null;
+      }
+    }
+    if (!kv) return null;
     const key = DOMAIN_PREFIX + slug(name);
     try {
       const raw = await kv.get(key);

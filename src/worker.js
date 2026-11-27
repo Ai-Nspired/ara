@@ -304,6 +304,32 @@ export default {
     }
     if (url.pathname === "/feedback" && request.method === "POST") return handleFeedback(request, env);
     if (url.pathname === "/outcome" && request.method === "POST") return handleOutcome(request, env);
+    // The loop's own door: a concept he just explained arrives with the domain it
+    // belongs to, its definition, what makes an answer competent in it, and what it
+    // relates to. No admin key: this is what he says, not an operator action.
+    if (url.pathname === "/domains/learn" && request.method === "POST") {
+      let body;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "invalid_json" }, 400);
+      }
+      const concept = String(body.concept || body.term || "").trim();
+      const name = String(body.domain || body.name || "").trim();
+      if (!concept || !name) return json({ error: "concept_and_domain_required" }, 400);
+      try {
+        const record = await loopFor(env).addDomain(name, {
+          definition: body.definition || null,
+          principles: body.principles || null,
+          terms: [concept, ...(Array.isArray(body.terms) ? body.terms : [])],
+          relates: body.relates || null,
+        });
+        return json({ ok: true, domain: record });
+      } catch (error) {
+        return json({ error: "domain_failed", message: String(error.message || error) }, 400);
+      }
+    }
+
     if (url.pathname === "/domains") {
       if (request.method === "GET") {
         return json({ domains: await loopFor(env).domainRecords() });
@@ -323,6 +349,7 @@ export default {
               definition: body.definition || null,
               principles: body.principles || null,
               terms: body.terms || null,
+              relates: body.relates || null,
             })
           );
         } catch (error) {
